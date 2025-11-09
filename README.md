@@ -1,5 +1,8 @@
 # Project: Next Wave
 
+<img width="900" height="836" alt="Gemini_Generated_Image" src="https://github.com/user-attachments/assets/2206a6cf-7116-4868-a6ef-7f1e70f6be4c" />
+
+
 ## The Team Behind Next Wave
 
 **Ahanaf Akif**, **Alexa Jimenez**, **Joaquin Porter**, **Dylan Sedeno**

@@ -4,7 +4,7 @@
 
 **Ahanaf Akif**, **Alexa Jimenez**, **Jaoquine Porter**, **Dylan Sedeno**
 
-[Next Wave](http://nextwave-sharkbyte.s3-website-us-east-1.amazonaws.com/)
+[Next Wave](http://nextwave-sharkbyte.s3-website-us-east-1.amazonaws.com/), [Presentation](https://docs.google.com/presentation/d/1IwVg4L6BqqAa8QPMN2-bQCHtpTM91NZISJ3A9I1-mys/edit?usp=sharing)
 
 ## Next Wave: Your AI-Powered Career Compass
 

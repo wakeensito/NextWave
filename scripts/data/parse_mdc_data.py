@@ -122,7 +122,7 @@ def upload_to_dynamodb(programs_data):
 
 def main():
     """Main function to process all MDC data"""
-    base_path = Path('DataCollection/downloaded_pdfs')
+    base_path = PROJECT_ROOT / 'DataCollection' / 'downloaded_pdfs'
     
     if not base_path.exists():
         print(f"Error: {base_path} not found!")

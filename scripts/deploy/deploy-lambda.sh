@@ -11,6 +11,11 @@ if ! aws lambda get-function --function-name NextWave &>/dev/null; then
     exit 1
 fi
 
+# Get script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
 # Install dependencies
 echo "📦 Installing Python dependencies..."
 pip3 install -r requirements.txt -t . --quiet || python3 -m pip install -r requirements.txt -t . --quiet

@@ -287,6 +287,20 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
 
   // Normalize pathway data to handle API response inconsistencies
   const normalizePathwayData = (pathway: PathwayData): PathwayData => {
+    // Safety check - ensure pathway is an object
+    if (!pathway || typeof pathway !== 'object') {
+      console.error('Invalid pathway data:', pathway);
+      return {
+        career: 'Unknown',
+        degreeLevel: 'associate',
+        associates: {
+          programs: ['MDC Associate Program'],
+          duration: '2 years',
+          keyCourses: ['Core courses']
+        }
+      };
+    }
+    
     const normalized = { ...pathway };
     
     // Ensure arrays are always arrays
@@ -418,8 +432,22 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
 
       if (data.pathway) {
         try {
+          // Ensure pathway is an object before normalizing
+          if (!data.pathway || typeof data.pathway !== 'object') {
+            throw new Error('Invalid pathway data structure');
+          }
+          
           // Normalize the pathway data to handle API inconsistencies
           const normalizedPathway = normalizePathwayData(data.pathway);
+          
+          // Ensure associates always exists - critical for rendering
+          if (!normalizedPathway.associates || typeof normalizedPathway.associates !== 'object') {
+            normalizedPathway.associates = {
+              programs: ['MDC Associate Program'],
+              duration: '2 years',
+              keyCourses: ['Core courses']
+            };
+          }
 
           // Ensure financial and careerOutcomes fields exist
           if (normalizedPathway.associates) {
@@ -475,9 +503,30 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
           if (!normalizedPathway.internships) normalizedPathway.internships = [];
           if (!normalizedPathway.alternativePathways) normalizedPathway.alternativePathways = [];
 
+          // Final safety check - ensure associates exists before setting
+          if (!normalizedPathway.associates || typeof normalizedPathway.associates !== 'object') {
+            console.error('Associates missing after normalization, using fallback');
+            normalizedPathway.associates = {
+              programs: ['MDC Associate Program'],
+              duration: '2 years',
+              keyCourses: ['Core courses'],
+              financial: {
+                tuitionPerYear: '4000-6000',
+                housingPerMonth: '800-1200',
+                booksPerYear: '1200',
+                totalCost: '12000-18000'
+              },
+              careerOutcomes: {
+                entryLevel: [{ title: 'Entry-Level Position', salary: '35000-45000' }],
+                midCareer: [{ title: 'Mid-Career Position', salary: '50000-70000' }]
+              }
+            };
+          }
+          
           setPathway(normalizedPathway);
         } catch (normalizeError) {
           console.error('Error normalizing pathway:', normalizeError);
+          console.error('Raw pathway data:', data.pathway);
           // Use fallback pathway
           setPathway({
             career: career,
@@ -651,12 +700,18 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
             <span>{step === 1 ? 'Cancel' : 'Back'}</span>
           </button>
 
-          <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              onClose();
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer"
+          >
             <Waves className="w-5 h-5 text-cyan-600" />
             <span className="text-xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-cyan-600 to-teal-600">
               Next Wave
             </span>
-          </div>
+          </button>
 
           <div className="w-20"></div>
         </div>
@@ -915,16 +970,29 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="mb-8 p-5 bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-200 rounded-xl shadow-sm"
+                  className="mb-8 p-7 bg-gradient-to-br from-cyan-50/80 via-teal-50/60 to-white border border-cyan-200/50 rounded-2xl shadow-sm backdrop-blur-sm"
                 >
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                      <h3 className="font-semibold text-blue-900">✨ AI-Generated Pathway</h3>
-                    </div>
-                    <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full font-medium">
-                      Powered by Gemini 2.5 Flash
-                    </span>
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="w-2.5 h-2.5 bg-cyan-500 rounded-full animate-pulse"></div>
+                    <h3 className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-cyan-700 to-teal-700">
+                      AI-Generated Pathway
+                    </h3>
+                    <div className="flex-1"></div>
+                    {(() => {
+                      try {
+                        const rawData = typeof pathway.rawResponse === 'string' 
+                          ? JSON.parse(pathway.rawResponse) 
+                          : pathway.rawResponse;
+                        const modelVersion = rawData?.modelVersion || 'gemini-2.5-flash';
+                        return (
+                          <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-cyan-100 to-teal-100 text-cyan-800 rounded-full font-medium border border-cyan-200/50">
+                            {modelVersion}
+                          </span>
+                        );
+                      } catch (e) {
+                        return null;
+                      }
+                    })()}
                   </div>
                   
                   {(() => {
@@ -933,30 +1001,23 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                         ? JSON.parse(pathway.rawResponse) 
                         : pathway.rawResponse;
                       
-                      const usage = rawData?.usageMetadata;
-                      const modelVersion = rawData?.modelVersion || 'gemini-2.5-flash';
-                      
                       return (
-                        <div className="space-y-3">
+                        <div className="space-y-4">
                           {/* Pathway Description/Note */}
                           {pathway.note && (
-                            <div className="bg-white/80 rounded-lg p-4 border border-blue-100">
-                              <p className="text-sm text-gray-700 leading-relaxed">{pathway.note}</p>
+                            <div className="bg-white/90 rounded-xl p-6 border border-cyan-100/50 shadow-sm">
+                              <p className="text-base text-gray-800 leading-relaxed font-normal" style={{ lineHeight: '1.7', margin: 0 }}>
+                                {pathway.note}
+                              </p>
                             </div>
                           )}
-                          
-                          {/* Model Info - Clean and minimal */}
-                          <div className="flex items-center gap-2 text-xs text-blue-700 pt-2 border-t border-blue-200">
-                            <span className="font-medium">Model:</span>
-                            <span className="px-2 py-0.5 bg-blue-100 rounded">{modelVersion}</span>
-                          </div>
                         </div>
                       );
                     } catch (e) {
                       return (
-                        <div className="text-sm text-blue-700">
+                        <div className="text-sm text-cyan-700">
                           <p className="font-medium mb-1">✅ Response Generated Successfully</p>
-                          <p className="text-xs text-blue-600">Pathway data has been processed and displayed above.</p>
+                          <p className="text-xs text-cyan-600">Pathway data has been processed and displayed above.</p>
                         </div>
                       );
                     }
@@ -1002,11 +1063,57 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
 
                 {/* Timeline Steps */}
                 <div className="space-y-12">
-                    {/* Show message if pathway exists but is empty */}
+                    {/* Show message if pathway exists but is empty - with fallback */}
                     {pathway && !pathway.associates && !pathway.bachelors && (
-                      <div className="text-center py-8 text-gray-500">
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="text-center py-8 text-gray-500"
+                      >
                         <p>Pathway data is being processed. Please try again in a moment.</p>
-                      </div>
+                        <button
+                          onClick={() => {
+                            setPathway({
+                              career: career,
+                              degreeLevel: degree,
+                              associates: {
+                                programs: ['MDC Associate Program'],
+                                duration: '2 years',
+                                keyCourses: ['Core courses'],
+                                financial: {
+                                  tuitionPerYear: '4000-6000',
+                                  housingPerMonth: '800-1200',
+                                  booksPerYear: '1200',
+                                  totalCost: '12000-18000'
+                                },
+                                careerOutcomes: {
+                                  entryLevel: [{ title: 'Entry-Level Position', salary: '35000-45000' }],
+                                  midCareer: [{ title: 'Mid-Career Position', salary: '50000-70000' }]
+                                }
+                              },
+                              bachelors: degree === 'bachelor' ? {
+                                universities: ['Transfer to 4-year university'],
+                                duration: '2 years (after AA)',
+                                keyCourses: ['Advanced courses'],
+                                financial: {
+                                  tuitionPerYear: '8000-25000',
+                                  housingPerMonth: '1000-1500',
+                                  booksPerYear: '1500',
+                                  totalCost: '21000-35000'
+                                },
+                                careerOutcomes: {
+                                  entryLevel: [{ title: 'Entry-Level Position', salary: '55000-70000' }],
+                                  midCareer: [{ title: 'Mid-Career Position', salary: '75000-110000' }]
+                                }
+                              } : undefined,
+                              note: `Starting with an Associate's degree at MDC provides a solid foundation for your ${career} career.`
+                            });
+                          }}
+                          className="mt-4 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors"
+                        >
+                          Show Fallback Pathway
+                        </button>
+                      </motion.div>
                     )}
                     {/* Associate's Degree */}
                     {pathway?.associates && (
@@ -1337,45 +1444,96 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                       </motion.div>
                     )}
 
-                    {/* Certifications & Exams - Only show if both exist and have content */}
-                    {((pathway?.certifications && Array.isArray(pathway.certifications) && pathway.certifications.length > 0) || 
-                      (pathway?.exams && Array.isArray(pathway.exams) && pathway.exams.length > 0)) ? (
-                      <motion.div
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.8 }}
-                        className="relative pl-20 mt-8"
-                      >
-                        <div className="absolute left-0 top-0 w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 shadow-lg flex items-center justify-center" style={{ background: 'linear-gradient(to bottom right, rgb(168, 85, 247), rgb(126, 34, 206))' }}>
-                          <CheckCircle2 className="w-7 h-7 text-white fill-white" />
-                        </div>
-                        <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-gray-200/50 shadow-lg">
-                          <h3 className="text-2xl font-semibold text-gray-900 mb-4">Certifications & Exams</h3>
-                          {pathway.certifications && pathway.certifications.length > 0 && (
-                            <div className="mb-4">
-                              <p className="text-sm font-semibold text-gray-900 mb-3">Certifications:</p>
-                              {pathway.certifications.map((cert, idx) => (
-                                <div key={idx} className="flex items-start gap-2 text-sm text-gray-700 mb-2 leading-relaxed">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 flex-shrink-0"></div>
-                                  <span>{cert.name} {cert.required && <span className="text-red-600 font-medium">(Required)</span>} - {cert.timing}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {pathway.exams && pathway.exams.length > 0 && (
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900 mb-3">Exams:</p>
-                              {pathway.exams.map((exam, idx) => (
-                                <div key={idx} className="flex items-start gap-2 text-sm text-gray-700 mb-2 leading-relaxed">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 flex-shrink-0"></div>
-                                  <span>{exam.name} {exam.required && <span className="text-red-600 font-medium">(Required)</span>} - {exam.timing}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </motion.div>
-                    ) : null}
+                    {/* Certifications & Exams - Only show if both exist and have valid content */}
+                    {(() => {
+                      // Helper function to check if array has valid content (not just hyphens or empty strings)
+                      const hasValidContent = (arr: any[]): boolean => {
+                        if (!arr || arr.length === 0) return false;
+                        return arr.some(item => {
+                          if (typeof item === 'string') {
+                            const trimmed = item.trim();
+                            return trimmed.length > 0 && trimmed !== '-';
+                          }
+                          if (typeof item === 'object' && item !== null) {
+                            const name = item.name || item;
+                            const trimmed = String(name).trim();
+                            return trimmed.length > 0 && trimmed !== '-';
+                          }
+                          return false;
+                        });
+                      };
+
+                      const hasCertifications = pathway?.certifications && 
+                        Array.isArray(pathway.certifications) && 
+                        hasValidContent(pathway.certifications);
+                      
+                      const hasExams = pathway?.exams && 
+                        Array.isArray(pathway.exams) && 
+                        hasValidContent(pathway.exams);
+
+                      // Only show if at least one has valid content
+                      if (!hasCertifications && !hasExams) return null;
+
+                      return (
+                        <motion.div
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.8 }}
+                          className="relative pl-20 mt-8"
+                        >
+                          <div className="absolute left-0 top-0 w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 shadow-lg flex items-center justify-center" style={{ background: 'linear-gradient(to bottom right, rgb(168, 85, 247), rgb(126, 34, 206))' }}>
+                            <CheckCircle2 className="w-7 h-7 text-white fill-white" />
+                          </div>
+                          <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-gray-200/50 shadow-lg">
+                            <h3 className="text-2xl font-semibold text-gray-900 mb-4">Certifications & Exams</h3>
+                            {hasCertifications && (
+                              <div className="mb-4">
+                                <p className="text-sm font-semibold text-gray-900 mb-3">Certifications:</p>
+                                {pathway.certifications
+                                  .filter(cert => {
+                                    const name = typeof cert === 'string' ? cert : (cert?.name || cert);
+                                    const trimmed = String(name).trim();
+                                    return trimmed.length > 0 && trimmed !== '-';
+                                  })
+                                  .map((cert, idx) => {
+                                    const certName = typeof cert === 'string' ? cert : (cert?.name || cert);
+                                    const required = typeof cert === 'object' && cert?.required;
+                                    const timing = typeof cert === 'object' && cert?.timing ? ` - ${cert.timing}` : '';
+                                    return (
+                                      <div key={idx} className="flex items-start gap-2 text-sm text-gray-700 mb-2 leading-relaxed">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 flex-shrink-0"></div>
+                                        <span>{certName}{required && <span className="text-red-600 font-medium"> (Required)</span>}{timing}</span>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            )}
+                            {hasExams && (
+                              <div>
+                                <p className="text-sm font-semibold text-gray-900 mb-3">Exams:</p>
+                                {pathway.exams
+                                  .filter(exam => {
+                                    const name = typeof exam === 'string' ? exam : (exam?.name || exam);
+                                    const trimmed = String(name).trim();
+                                    return trimmed.length > 0 && trimmed !== '-';
+                                  })
+                                  .map((exam, idx) => {
+                                    const examName = typeof exam === 'string' ? exam : (exam?.name || exam);
+                                    const required = typeof exam === 'object' && exam?.required;
+                                    const timing = typeof exam === 'object' && exam?.timing ? ` - ${exam.timing}` : '';
+                                    return (
+                                      <div key={idx} className="flex items-start gap-2 text-sm text-gray-700 mb-2 leading-relaxed">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 flex-shrink-0"></div>
+                                        <span>{examName}{required && <span className="text-red-600 font-medium"> (Required)</span>}{timing}</span>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      );
+                    })()}
 
                     {/* Internships */}
                     {pathway?.internships && pathway.internships.length > 0 && (

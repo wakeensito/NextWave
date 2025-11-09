@@ -1,20 +1,26 @@
 #!/bin/bash
 
+# Get script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
 # Improved script to upload all unique MDC programs to DynamoDB
 
 echo "📦 Uploading all MDC Programs to DynamoDB..."
 
 # Use Python to parse CSV and get unique programs
-python3 << 'PYTHON_SCRIPT'
+python3 << PYTHON_SCRIPT
 import csv
 import json
 import subprocess
 from datetime import datetime
 
+PROJECT_ROOT = "$PROJECT_ROOT"
 programs = {}
 
 # Read CSV and get unique programs
-with open('DataCollection/pdf_download_log.csv', 'r') as f:
+with open(f'{PROJECT_ROOT}/DataCollection/pdf_download_log.csv', 'r') as f:
     reader = csv.DictReader(f)
     for row in reader:
         major = row.get('Major', '').strip()

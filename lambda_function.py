@@ -39,6 +39,188 @@ def get_gemini_api_key():
             secret = json.loads(response['SecretString'])
             return secret.get('GEMINI_API_KEY') or secret.get('api_key') or list(secret.values())[0]
 
+def get_agent_api_key():
+    """Retrieve Agent API key from Parameter Store"""
+    try:
+        # Try Parameter Store first - using 'agent-api-key' parameter name
+        response = ssm.get_parameter(
+            Name='agent-api-key',
+            WithDecryption=True
+        )
+        return response['Parameter']['Value']
+    except ssm.exceptions.ParameterNotFound:
+        # Fallback to alternative parameter name
+        try:
+            response = ssm.get_parameter(
+                Name='/nextwave/agent-api-key',
+                WithDecryption=True
+            )
+            return response['Parameter']['Value']
+        except ssm.exceptions.ParameterNotFound:
+            raise Exception("Agent API key not found in Parameter Store. Please add 'agent-api-key' or '/nextwave/agent-api-key'")
+
+def get_agent_endpoint():
+    """Retrieve Agent endpoint URL from Parameter Store or use default"""
+    try:
+        # Try Parameter Store first
+        response = ssm.get_parameter(
+            Name='agent-endpoint',
+            WithDecryption=False  # URL doesn't need encryption
+        )
+        return response['Parameter']['Value']
+    except ssm.exceptions.ParameterNotFound:
+        try:
+            response = ssm.get_parameter(
+                Name='/nextwave/agent-endpoint',
+                WithDecryption=False
+            )
+            return response['Parameter']['Value']
+        except ssm.exceptions.ParameterNotFound:
+            # Default endpoint (can be overridden via Parameter Store)
+            return 'https://acx5dwqzgp76e34tk5oysuly.agents.do-ai.run'
+
+def get_agent_api_key():
+    """Retrieve Agent API key from Parameter Store"""
+    try:
+        response = ssm.get_parameter(
+            Name='agent-api-key',
+            WithDecryption=True
+        )
+        return response['Parameter']['Value']
+    except ssm.exceptions.ParameterNotFound:
+        try:
+            response = ssm.get_parameter(
+                Name='/nextwave/agent-api-key',
+                WithDecryption=True
+            )
+            return response['Parameter']['Value']
+        except ssm.exceptions.ParameterNotFound:
+            raise Exception("Agent API key not found in Parameter Store")
+
+def get_agent_endpoint():
+    """Retrieve Agent endpoint URL from Parameter Store or use default"""
+    try:
+        response = ssm.get_parameter(
+            Name='agent-endpoint',
+            WithDecryption=False
+        )
+        return response['Parameter']['Value']
+    except ssm.exceptions.ParameterNotFound:
+        try:
+            response = ssm.get_parameter(
+                Name='/nextwave/agent-endpoint',
+                WithDecryption=False
+            )
+            return response['Parameter']['Value']
+        except ssm.exceptions.ParameterNotFound:
+            return 'https://acx5dwqzgp76e34tk5oysuly.agents.do-ai.run'
+
+def handle_chat_request(event, context):
+    """Handle chatbot API requests - proxies to DigitalOcean agent"""
+    try:
+        # Parse request
+        if isinstance(event.get('body'), str):
+            body = json.loads(event['body'])
+        else:
+            body = event.get('body') or {}
+        
+        messages = body.get('messages', [])
+        
+        if not messages:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+                },
+                'body': json.dumps({
+                    'error': 'Messages field is required'
+                })
+            }
+        
+        # Get agent credentials
+        api_key = get_agent_api_key()
+        endpoint = get_agent_endpoint()
+        url = f"{endpoint}/api/v1/chat/completions"
+        
+        # Prepare request to DigitalOcean agent
+        payload = {
+            "messages": messages,
+            "stream": False
+        }
+        
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+        
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                
+                # Extract message from response
+                if 'choices' in result and len(result['choices']) > 0:
+                    message_content = result['choices'][0].get('message', {}).get('content', '')
+                elif 'message' in result:
+                    message_content = result['message']
+                elif 'content' in result:
+                    message_content = result['content']
+                else:
+                    message_content = json.dumps(result)
+                
+                return {
+                    'statusCode': 200,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Headers': 'Content-Type',
+                        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+                    },
+                    'body': json.dumps({
+                        'message': message_content,
+                        'content': message_content
+                    })
+                }
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode('utf-8') if hasattr(e, 'read') else str(e)
+            print(f"HTTP Error {e.code}: {error_body}")
+            return {
+                'statusCode': e.code,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+                },
+                'body': json.dumps({
+                    'error': f'Agent API error: {error_body}'
+                })
+            }
+        
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
+            },
+            'body': json.dumps({
+                'error': str(e)
+            })
+        }
+
 def get_college_scorecard_api_key():
     """Retrieve College Scorecard API key from Parameter Store"""
     try:
@@ -581,7 +763,19 @@ CRITICAL:
         }
 
 def lambda_handler(event, context):
-    """Main Lambda handler"""
+    """Main Lambda handler - routes to pathway or chat based on path"""
+    # Check the API Gateway path to route requests
+    # API Gateway v1 uses 'path' or 'requestContext.resourcePath'
+    path = (event.get('path', '') or 
+            event.get('requestContext', {}).get('path', '') or 
+            event.get('requestContext', {}).get('resourcePath', '') or 
+            event.get('rawPath', ''))
+    
+    # Route to chat handler if path contains '/chat'
+    if '/chat' in path:
+        return handle_chat_request(event, context)
+    
+    # Otherwise, handle pathway requests (existing code)
     try:
         # Parse request
         if isinstance(event.get('body'), str):
@@ -856,6 +1050,25 @@ def lambda_handler(event, context):
         
         if 'internships' not in pathway_data:
             pathway_data['internships'] = []
+        
+        # Final safety check - ensure associates exists and is a dict
+        if 'associates' not in pathway_data or not isinstance(pathway_data.get('associates'), dict):
+            print(f"CRITICAL: Associates missing or invalid for {career}, adding fallback")
+            pathway_data['associates'] = {
+                'programs': [f'MDC {career} Associate Program'],
+                'duration': '2 years',
+                'keyCourses': ['Core courses'],
+                'financial': {
+                    'tuitionPerYear': '4000-6000',
+                    'housingPerMonth': '800-1200',
+                    'booksPerYear': '1200',
+                    'totalCost': '12000-18000'
+                },
+                'careerOutcomes': {
+                    'entryLevel': [{"title": f"{career} Assistant", "salary": "35000-45000"}],
+                    'midCareer': [{"title": f"{career} Specialist", "salary": "50000-70000"}]
+                }
+            }
         
         # Store in DynamoDB
         try:

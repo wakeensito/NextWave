@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Search, ArrowRight, Sparkles, TrendingUp, Users, Award, CheckCircle2, Waves, Palmtree } from 'lucide-react';
+import { Search, ArrowRight, Sparkles, TrendingUp, Award, CheckCircle2, Waves, Palmtree, MessageCircle } from 'lucide-react';
 import { motion, useScroll, useTransform } from 'motion/react';
 import { ImageWithFallback } from './components/figma/ImageWithFallback';
 import { CareerWizard } from './components/CareerWizard';
 import { ComparePrograms } from './components/ComparePrograms';
 import { FinancialPlanner } from './components/FinancialPlanner';
+import { ChatBot } from './components/ChatBot';
 
 // Shark Tooth Icon Component
 function SharkTooth({ className = "" }: { className?: string }) {
@@ -49,11 +50,11 @@ function WaveDivider({ className = "", flip = false }: { className?: string; fli
 }
 
 export default function App() {
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showWizard, setShowWizard] = useState(false);
   const [showComparePrograms, setShowComparePrograms] = useState(false);
   const [showFinancialPlanner, setShowFinancialPlanner] = useState(false);
+  const [showChatBot, setShowChatBot] = useState(false);
   const [selectedMajorId, setSelectedMajorId] = useState<string | undefined>(undefined);
   const { scrollYProgress } = useScroll();
   const opacity = useTransform(scrollYProgress, [0, 0.2], [1, 0]);
@@ -61,7 +62,7 @@ export default function App() {
 
   // Prevent background scrolling when any modal is open
   useEffect(() => {
-    if (showWizard || showComparePrograms || showFinancialPlanner) {
+    if (showWizard || showComparePrograms || showFinancialPlanner || showChatBot) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -71,7 +72,7 @@ export default function App() {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [showWizard, showComparePrograms, showFinancialPlanner]);
+  }, [showWizard, showComparePrograms, showFinancialPlanner, showChatBot]);
 
   const handleSearch = () => {
     if (searchQuery.trim()) {
@@ -85,18 +86,6 @@ export default function App() {
     }
   };
 
-  const categories = [
-    { name: 'Technology', color: 'bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100' },
-    { name: 'Business', color: 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100' },
-    { name: 'Health', color: 'bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100' },
-    { name: 'Arts', color: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' },
-  ];
-
-  const stats = [
-    { value: '500K+', label: 'Students Guided', icon: Users },
-    { value: '1,200+', label: 'Career Pathways', icon: TrendingUp },
-    { value: '98%', label: 'Success Rate', icon: Award },
-  ];
 
   const pathwayCards = [
     {
@@ -147,6 +136,8 @@ export default function App() {
           onClose={() => {
             setShowWizard(false);
             setSearchQuery('');
+            // Scroll to top of page when closing
+            window.scrollTo({ top: 0, behavior: 'smooth' });
           }} 
         />
       )}
@@ -166,13 +157,48 @@ export default function App() {
           onClose={() => setShowFinancialPlanner(false)} 
         />
       )}
+
+      {showChatBot && (
+        <ChatBot 
+          onClose={() => setShowChatBot(false)} 
+        />
+      )}
+
+      {/* Floating Chat Button - Always Visible in Bottom Right Corner */}
+      {!showChatBot && (
+        <motion.button
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => setShowChatBot(true)}
+          className="fixed bottom-6 right-6 w-16 h-16 bg-gradient-to-r from-cyan-600 to-teal-600 text-white rounded-full shadow-2xl hover:shadow-cyan-500/50 flex items-center justify-center transition-all duration-300 group"
+          style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 99999 }}
+          aria-label="Open chat with advisor"
+        >
+          <MessageCircle className="w-7 h-7 group-hover:scale-110 transition-transform relative z-10" />
+          {/* Pulse animation - smooth and continuous */}
+          <motion.div
+            className="absolute inset-0 rounded-full bg-cyan-400"
+            animate={{
+              scale: [1, 1.5, 1.5],
+              opacity: [0.5, 0, 0],
+            }}
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              ease: "easeOut",
+            }}
+          />
+        </motion.button>
+      )}
       
       <div className="min-h-screen bg-gradient-to-b from-white via-cyan-50/30 to-orange-50/20">
-      {/* Hero Section */}
-      <motion.section 
-        style={{ opacity, scale }}
-        className="relative min-h-[90vh] flex items-center justify-center px-4 overflow-hidden"
-      >
+            {/* Hero Section */}
+            <motion.section 
+              style={{ opacity, scale }}
+              className="relative min-h-screen flex items-center justify-center px-4 overflow-hidden"
+            >
         {/* Subtle Background Pattern */}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(6,182,212,0.08),transparent_50%),radial-gradient(circle_at_70%_60%,rgba(251,146,60,0.06),transparent_50%)]"></div>
         
@@ -199,18 +225,6 @@ export default function App() {
         >
           <Palmtree className="w-96 h-96 text-cyan-500" strokeWidth={1.5} />
         </motion.div>
-        {/* Additional smaller palm trees for depth */}
-        <motion.div
-          animate={{ rotate: [0, 3, 0], y: [0, -5, 0] }}
-          transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-          className="absolute top-1/3 right-[20%] pointer-events-none hidden xl:block"
-          style={{ 
-            filter: 'drop-shadow(0 5px 20px rgba(251, 146, 60, 0.2))',
-            opacity: 0.15
-          }}
-        >
-          <Palmtree className="w-48 h-48 text-orange-400" strokeWidth={1.5} />
-        </motion.div>
         
         {/* Animated Background Orbs */}
         <motion.div 
@@ -230,7 +244,7 @@ export default function App() {
           className="absolute bottom-20 left-10 w-96 h-96 bg-gradient-to-tr from-orange-300/20 to-amber-300/20 rounded-full blur-3xl"
         ></motion.div>
 
-        <div className="max-w-5xl mx-auto text-center relative z-10">
+        <div className="max-w-6xl mx-auto text-center relative z-10 py-20">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -238,7 +252,7 @@ export default function App() {
           >
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/60 backdrop-blur-sm border border-cyan-200/50 rounded-full mb-8 shadow-sm">
               <Waves className="w-4 h-4 text-cyan-600" />
-              <span className="text-cyan-900">Powered by AI Career Intelligence</span>
+              <span className="text-cyan-900">Powered by Miami Dade College</span>
             </div>
           </motion.div>
 
@@ -246,8 +260,8 @@ export default function App() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1 }}
-            className="mb-6"
-            style={{ fontSize: '5rem', lineHeight: '1.1', fontWeight: '800', letterSpacing: '-0.03em' }}
+            className="mb-8"
+            style={{ fontSize: 'clamp(4rem, 12vw, 8rem)', lineHeight: '1.1', fontWeight: '800', letterSpacing: '-0.04em' }}
           >
             <span className="text-gray-600">Your </span>
             <span 
@@ -268,10 +282,10 @@ export default function App() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
-            className="mb-12 text-gray-600 max-w-2xl mx-auto"
-            style={{ fontSize: '1.25rem', lineHeight: '1.8' }}
+            className="mb-16 text-gray-600 max-w-2xl mx-auto"
+            style={{ fontSize: 'clamp(1.125rem, 2vw, 1.5rem)', lineHeight: '1.8' }}
           >
-            Navigate the currents of your career journey with AI-powered pathways that chart your course to success
+            Navigate the currents of your career journey
           </motion.p>
 
           {/* Start Button */}
@@ -279,7 +293,7 @@ export default function App() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.3 }}
-            className="flex justify-center mb-8"
+            className="flex justify-center gap-4 mb-8 flex-wrap"
           >
             <motion.button
               whileHover={{ scale: 1.05, y: -2 }}
@@ -291,65 +305,16 @@ export default function App() {
               Get Started
               <ArrowRight className="w-6 h-6" />
             </motion.button>
-          </motion.div>
-
-          {/* Category Chips */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
-            className="flex flex-wrap justify-center gap-3 mb-4"
-          >
-            {categories.map((category, index) => (
-              <motion.button
-                key={category.name}
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.3, delay: 0.5 + index * 0.1 }}
-                whileHover={{ scale: 1.05, y: -2 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setSelectedCategory(category.name)}
-                className={`px-5 py-2.5 rounded-full transition-all duration-200 border ${
-                  category.color
-                } ${
-                  selectedCategory === category.name
-                    ? 'shadow-md ring-2 ring-offset-2 ring-cyan-300'
-                    : 'shadow-sm hover:shadow-md'
-                }`}
-              >
-                {category.name}
-              </motion.button>
-            ))}
-          </motion.div>
-
-          {/* Stats Bar */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.6 }}
-            className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto"
-          >
-            {stats.map((stat, index) => (
-              <div key={stat.label} className="relative">
-                {index < stats.length - 1 && (
-                  <div className="hidden md:block absolute -right-4 top-1/2 transform -translate-y-1/2">
-                    <Waves className="w-3 h-3 text-cyan-300/40" />
-                  </div>
-                )}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.7 + index * 0.1 }}
-                  className="flex flex-col items-center gap-2"
-                >
-                  <stat.icon className="w-6 h-6 text-cyan-600 mb-1" />
-                  <div className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-600 to-teal-600">
-                    {stat.value}
-                  </div>
-                  <div className="text-gray-600">{stat.label}</div>
-                </motion.div>
-              </div>
-            ))}
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowChatBot(true)}
+              className="px-8 py-5 bg-white border-2 border-cyan-300 text-cyan-700 rounded-2xl shadow-lg hover:shadow-xl hover:bg-cyan-50 transition-all duration-300 flex items-center gap-3"
+              style={{ fontSize: '1.25rem', fontWeight: '600' }}
+            >
+              <MessageCircle className="w-6 h-6" />
+              Chat with Advisor
+            </motion.button>
           </motion.div>
         </div>
       </motion.section>
@@ -423,80 +388,6 @@ export default function App() {
       {/* Wave Transition 2 */}
       <WaveDivider flip={true} className="-mb-1" />
 
-      {/* Journey Timeline Section */}
-      <section className="py-32 px-4 relative bg-gradient-to-b from-white to-cyan-50/30">
-        <div className="max-w-5xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-100px" }}
-            transition={{ duration: 0.6 }}
-            className="text-center mb-20"
-          >
-            <h2 className="mb-4 text-transparent bg-clip-text bg-gradient-to-r from-cyan-900 to-teal-900" style={{ fontSize: '3rem', fontWeight: '700' }}>
-              Your Academic Journey
-            </h2>
-            <p className="text-gray-600 max-w-2xl mx-auto" style={{ fontSize: '1.125rem', lineHeight: '1.8' }}>
-              A clear, flexible roadmap from your first degree to advanced studies
-            </p>
-          </motion.div>
-          
-          <div className="relative">
-            {/* Timeline Line */}
-            <div className="absolute left-1/2 transform -translate-x-1/2 w-px h-full bg-gradient-to-b from-cyan-200 via-teal-200 to-orange-200 hidden lg:block"></div>
-            
-            {/* Timeline Steps */}
-            <div className="space-y-16">
-              {journeySteps.map((step, index) => (
-                <motion.div
-                  key={index}
-                  initial={{ opacity: 0, x: index % 2 === 0 ? -50 : 50 }}
-                  whileInView={{ opacity: 1, x: 0 }}
-                  viewport={{ once: true, margin: "-100px" }}
-                  transition={{ duration: 0.6, delay: index * 0.1 }}
-                  className={`relative flex items-center ${
-                    index % 2 === 0 ? 'lg:flex-row' : 'lg:flex-row-reverse'
-                  } flex-col lg:gap-12 gap-6`}
-                >
-                  {/* Content Card */}
-                  <div className={`w-full lg:w-5/12 ${index % 2 === 0 ? 'lg:text-right' : 'lg:text-left'} text-center`}>
-                    <motion.div 
-                      whileHover={{ scale: 1.02, y: -4 }}
-                      className="bg-white/80 backdrop-blur-sm rounded-2xl p-8 border border-gray-200/50 hover:border-cyan-300/50 hover:shadow-xl transition-all duration-300"
-                    >
-                      <div className={`inline-block px-4 py-1.5 rounded-full mb-4 text-sm font-medium bg-gradient-to-r ${step.color} text-white`}>
-                        {step.duration}
-                      </div>
-                      <h3 className="mb-3 text-gray-900" style={{ fontSize: '1.75rem', fontWeight: '600' }}>
-                        {step.title}
-                      </h3>
-                      <p className="text-gray-600 leading-relaxed">
-                        {step.description}
-                      </p>
-                    </motion.div>
-                  </div>
-
-                  {/* Center Circle */}
-                  <motion.div 
-                    whileHover={{ scale: 1.1, rotate: 5 }}
-                    className={`relative z-10 w-24 h-24 rounded-full bg-gradient-to-br ${step.color} shadow-lg flex items-center justify-center flex-shrink-0`}
-                  >
-                    <span className="text-white font-bold text-xl">
-                      {step.degree}
-                    </span>
-                  </motion.div>
-
-                  {/* Spacer */}
-                  <div className="hidden lg:block w-5/12"></div>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Wave Transition 3 */}
-      <WaveDivider className="-mb-1" />
 
       {/* Call to Action Section */}
       <section className="py-32 px-4 relative overflow-hidden">

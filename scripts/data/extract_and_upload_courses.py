@@ -6,10 +6,16 @@ This script processes PDFs and populates the courses array for each program
 
 import json
 import os
+import sys
 import re
 import subprocess
 from pathlib import Path
 from datetime import datetime
+
+# Get project root (two levels up from this script)
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent.parent.resolve()
+sys.path.insert(0, str(PROJECT_ROOT))
 
 def extract_text_from_pdf(pdf_path):
     """Extract text from PDF using pdftotext (more reliable than PyPDF2)"""
@@ -94,7 +100,7 @@ def extract_courses_from_text(text, program_name):
 def load_program_mapping():
     """Load program mapping from CSV to match PDF filenames to program IDs"""
     mapping = {}
-    csv_path = Path('DataCollection/pdf_download_log.csv')
+    csv_path = PROJECT_ROOT / 'DataCollection' / 'pdf_download_log.csv'
     
     if not csv_path.exists():
         return mapping
@@ -271,7 +277,7 @@ def process_pdf_and_upload(pdf_path, program_mapping, aws_region='us-east-1'):
 
 def main():
     """Main function to process all PDFs"""
-    base_path = Path('DataCollection/downloaded_pdfs')
+    base_path = PROJECT_ROOT / 'DataCollection' / 'downloaded_pdfs'
     
     if not base_path.exists():
         print(f"Error: {base_path} not found!")

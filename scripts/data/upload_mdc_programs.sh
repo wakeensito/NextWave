@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Get script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
 # Script to upload MDC program data to DynamoDB using AWS CLI
 # This creates the basic program structure - you'll need to add course data manually
 
@@ -49,7 +54,7 @@ EOF
         echo "✗ Error uploading: $major"
     fi
     
-done < DataCollection/pdf_download_log.csv
+done < "$PROJECT_ROOT/DataCollection/pdf_download_log.csv"
 
 echo ""
 echo "✅ Upload complete!"

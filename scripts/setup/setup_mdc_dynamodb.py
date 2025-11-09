@@ -4,9 +4,16 @@ Run this script locally (not in Lambda) to populate the table
 """
 
 import json
+import sys
 import boto3
 from datetime import datetime
+from pathlib import Path
 import csv
+
+# Get project root (two levels up from this script)
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent.parent.resolve()
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
@@ -47,7 +54,8 @@ def load_programs_from_csv():
     
     # Read from pdf_download_log.csv
     try:
-        with open('DataCollection/pdf_download_log.csv', 'r') as f:
+        csv_path = PROJECT_ROOT / 'DataCollection' / 'pdf_download_log.csv'
+        with open(csv_path, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 major = row.get('Major', '').strip()

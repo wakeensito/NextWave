@@ -12,8 +12,40 @@ node_modules/
 build/
 dist/
 *.zip
+chat-lambda-deployment.zip
+lambda_function.zip
 
-# Python
+# Python packages (installed dependencies - should use requirements.txt)
+annotated_types/
+apiclient/
+bin/
+cachetools/
+certifi/
+charset_normalizer/
+dateutil/
+google/
+googleapiclient/
+google_auth_httplib2.py
+google_generativeai-*.pth
+httplib2/
+idna/
+jmespath/
+proto/
+pyasn1/
+pyasn1_modules/
+pydantic/
+pydantic_core/
+pyparsing/
+PyPDF2/
+requests/
+rsa/
+six.py
+tqdm/
+typing_extensions.py
+typing_inspection/
+uritemplate/
+
+# Python cache and compiled files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -23,11 +55,6 @@ env/
 venv/
 ENV/
 *.egg-info/
-google/
-boto3/
-botocore/
-s3transfer/
-urllib3/
 *.dist-info/
 
 # IDE
@@ -47,13 +74,27 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# AWS
-lambda-deployment.zip
+# AWS credentials and keys
 *.pem
 *.key
+*.p12
 
 # Temporary files
 *.tmp
 .cache/
 
+# Data collection (large PDFs and logs)
+DataCollection/downloaded_pdfs/
+DataCollection/*.csv
+DataCollection/*.ipynb
+
+# Old/unused files
+chat_lambda_function.py
 sharkbyte2025/
+index.html
+
+# Python utility files (should be in requirements.txt)
+google_auth_httplib2.py
+six.py
+typing_extensions.py
+

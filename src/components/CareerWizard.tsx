@@ -186,12 +186,6 @@ interface PathwayData {
       entryLevel?: Array<{ title: string; salary: string }>;
       midCareer?: Array<{ title: string; salary: string }>;
     };
-    roi?: {
-      investment?: string;
-      tenYearEarnings?: string;
-      roiPercentage?: string;
-      breakEvenMonths?: string;
-    };
   };
   bachelors?: {
     universities?: string[];
@@ -207,12 +201,6 @@ interface PathwayData {
     careerOutcomes?: {
       entryLevel?: Array<{ title: string; salary: string }>;
       midCareer?: Array<{ title: string; salary: string }>;
-    };
-    roi?: {
-      investment?: string;
-      tenYearEarnings?: string;
-      roiPercentage?: string;
-      breakEvenMonths?: string;
     };
   };
   masters?: {
@@ -259,6 +247,7 @@ const formatNumber = (value: string | undefined): string => {
   const num = parseInt(value.trim());
   return isNaN(num) ? value : num.toLocaleString();
 };
+
 
 export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps) {
   const [step, setStep] = useState(1);
@@ -334,12 +323,26 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
       }
     }
     
-    if (!Array.isArray(normalized.certifications)) {
-      normalized.certifications = normalized.certifications ? [normalized.certifications] : [];
+    // Only normalize certifications if they exist - don't add empty arrays
+    if (normalized.certifications !== undefined) {
+      if (!Array.isArray(normalized.certifications)) {
+        normalized.certifications = normalized.certifications ? [normalized.certifications] : [];
+      }
+      // Remove if empty
+      if (Array.isArray(normalized.certifications) && normalized.certifications.length === 0) {
+        delete normalized.certifications;
+      }
     }
     
-    if (!Array.isArray(normalized.exams)) {
-      normalized.exams = normalized.exams ? [normalized.exams] : [];
+    // Only normalize exams if they exist - don't add empty arrays
+    if (normalized.exams !== undefined) {
+      if (!Array.isArray(normalized.exams)) {
+        normalized.exams = normalized.exams ? [normalized.exams] : [];
+      }
+      // Remove if empty
+      if (Array.isArray(normalized.exams) && normalized.exams.length === 0) {
+        delete normalized.exams;
+      }
     }
     
     if (!Array.isArray(normalized.internships)) {
@@ -376,10 +379,10 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
 
   const fetchPathway = async () => {
     if (!career.trim() || !degree) return;
-    
+
     setLoading(true);
     setError(null);
-    
+
     try {
       const response = await fetch(API_ENDPOINT, {
         method: 'POST',
@@ -391,74 +394,217 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
           degreeLevel: degree,
         }),
       });
-      
+
       if (!response.ok) {
         throw new Error(`API error: ${response.statusText}`);
       }
-      
-      const data = await response.json();
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error('JSON parse error:', jsonError);
+        const text = await response.text();
+        console.error('Response text:', text);
+        throw new Error('Invalid JSON response from server');
+      }
+
       console.log('API Response:', data); // Debug log
+
+      // Check for error in response
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
       if (data.pathway) {
-        // Normalize the pathway data to handle API inconsistencies
-        const normalizedPathway = normalizePathwayData(data.pathway);
-        
-        // Ensure financial, careerOutcomes, and roi fields exist (for accordions)
-        if (normalizedPathway.associates && !normalizedPathway.associates.financial) {
-          normalizedPathway.associates.financial = {
-            tuitionPerYear: '4000-6000',
-            housingPerMonth: '800-1200',
-            booksPerYear: '1200',
-            totalCost: '12000-18000'
-          };
+        try {
+          // Normalize the pathway data to handle API inconsistencies
+          const normalizedPathway = normalizePathwayData(data.pathway);
+
+          // Ensure financial and careerOutcomes fields exist
+          if (normalizedPathway.associates) {
+            if (!normalizedPathway.associates.financial) {
+              normalizedPathway.associates.financial = {
+                tuitionPerYear: '4000-6000',
+                housingPerMonth: '800-1200',
+                booksPerYear: '1200',
+                totalCost: '12000-18000'
+              };
+            }
+            if (!normalizedPathway.associates.careerOutcomes) {
+              normalizedPathway.associates.careerOutcomes = {
+                entryLevel: [{ title: 'Entry-Level Position', salary: '35000-45000' }],
+                midCareer: [{ title: 'Mid-Career Position', salary: '50000-70000' }]
+              };
+            }
+          }
+
+          if (normalizedPathway.bachelors) {
+            if (!normalizedPathway.bachelors.financial) {
+              normalizedPathway.bachelors.financial = {
+                tuitionPerYear: '8000-25000',
+                housingPerMonth: '1000-1500',
+                booksPerYear: '1500',
+                totalCost: '21000-35000'
+              };
+            }
+            if (!normalizedPathway.bachelors.careerOutcomes) {
+              normalizedPathway.bachelors.careerOutcomes = {
+                entryLevel: [{ title: 'Entry-Level Position', salary: '55000-70000' }],
+                midCareer: [{ title: 'Mid-Career Position', salary: '75000-110000' }]
+              };
+            }
+          }
+
+          // Only add arrays if they don't exist - don't add empty arrays for certifications/exams
+          // If they're missing, that means they weren't needed (which is correct)
+          if (!normalizedPathway.certifications) {
+            // Don't add empty array - let it be undefined so the section doesn't show
+          } else if (Array.isArray(normalizedPathway.certifications) && normalizedPathway.certifications.length === 0) {
+            // Remove empty certifications array
+            delete normalizedPathway.certifications;
+          }
+          
+          if (!normalizedPathway.exams) {
+            // Don't add empty array - let it be undefined so the section doesn't show
+          } else if (Array.isArray(normalizedPathway.exams) && normalizedPathway.exams.length === 0) {
+            // Remove empty exams array
+            delete normalizedPathway.exams;
+          }
+          
+          if (!normalizedPathway.internships) normalizedPathway.internships = [];
+          if (!normalizedPathway.alternativePathways) normalizedPathway.alternativePathways = [];
+
+          setPathway(normalizedPathway);
+        } catch (normalizeError) {
+          console.error('Error normalizing pathway:', normalizeError);
+          // Use fallback pathway
+          setPathway({
+            career: career,
+            degreeLevel: degree,
+            associates: {
+              programs: ['MDC Associate Program'],
+              duration: '2 years',
+              keyCourses: ['Core courses'],
+              financial: {
+                tuitionPerYear: '4000-6000',
+                housingPerMonth: '800-1200',
+                booksPerYear: '1200',
+                totalCost: '12000-18000'
+              },
+              careerOutcomes: {
+                entryLevel: [{ title: 'Entry-Level Position', salary: '35000-45000' }],
+                midCareer: [{ title: 'Mid-Career Position', salary: '50000-70000' }]
+              }
+            },
+            bachelors: degree === 'bachelor' ? {
+              universities: ['Transfer to 4-year university'],
+              duration: '2 years (after AA)',
+              keyCourses: ['Advanced courses'],
+              financial: {
+                tuitionPerYear: '8000-25000',
+                housingPerMonth: '1000-1500',
+                booksPerYear: '1500',
+                totalCost: '21000-35000'
+              },
+              careerOutcomes: {
+                entryLevel: [{ title: 'Entry-Level Position', salary: '55000-70000' }],
+                midCareer: [{ title: 'Mid-Career Position', salary: '75000-110000' }]
+              }
+            } : undefined,
+            certifications: [],
+            exams: [],
+            internships: [],
+            alternativePathways: []
+          });
         }
-        if (normalizedPathway.associates && !normalizedPathway.associates.careerOutcomes) {
-          normalizedPathway.associates.careerOutcomes = {
-            entryLevel: [{ title: 'Entry-Level Position', salary: '35000-45000' }],
-            midCareer: [{ title: 'Mid-Career Position', salary: '50000-70000' }]
-          };
-        }
-        if (normalizedPathway.associates && !normalizedPathway.associates.roi) {
-          normalizedPathway.associates.roi = {
-            investment: '15000',
-            tenYearEarnings: '400000-500000',
-            roiPercentage: '2567',
-            breakEvenMonths: '6-8'
-          };
-        }
-        
-        if (normalizedPathway.bachelors && !normalizedPathway.bachelors.financial) {
-          normalizedPathway.bachelors.financial = {
-            tuitionPerYear: '8000-25000',
-            housingPerMonth: '1000-1500',
-            booksPerYear: '1500',
-            totalCost: '21000-35000'
-          };
-        }
-        if (normalizedPathway.bachelors && !normalizedPathway.bachelors.careerOutcomes) {
-          normalizedPathway.bachelors.careerOutcomes = {
-            entryLevel: [{ title: 'Entry-Level Position', salary: '55000-70000' }],
-            midCareer: [{ title: 'Mid-Career Position', salary: '75000-110000' }]
-          };
-        }
-        if (normalizedPathway.bachelors && !normalizedPathway.bachelors.roi) {
-          normalizedPathway.bachelors.roi = {
-            investment: '28000',
-            tenYearEarnings: '600000-800000',
-            roiPercentage: '2143',
-            breakEvenMonths: '5-7'
-          };
-        }
-        
-        setPathway(normalizedPathway);
       } else {
         console.error('No pathway in response:', data);
         setError('Pathway data not found in response');
+        // Still set a fallback pathway to prevent white screen
+        setPathway({
+          career: career,
+          degreeLevel: degree,
+          associates: {
+            programs: ['MDC Associate Program'],
+            duration: '2 years',
+            keyCourses: ['Core courses'],
+            financial: {
+              tuitionPerYear: '4000-6000',
+              housingPerMonth: '800-1200',
+              booksPerYear: '1200',
+              totalCost: '12000-18000'
+            },
+            careerOutcomes: {
+              entryLevel: [{ title: 'Entry-Level Position', salary: '35000-45000' }],
+              midCareer: [{ title: 'Mid-Career Position', salary: '50000-70000' }]
+            }
+          },
+          bachelors: degree === 'bachelor' ? {
+            universities: ['Transfer to 4-year university'],
+            duration: '2 years (after AA)',
+            keyCourses: ['Advanced courses'],
+            financial: {
+              tuitionPerYear: '8000-25000',
+              housingPerMonth: '1000-1500',
+              booksPerYear: '1500',
+              totalCost: '21000-35000'
+            },
+            careerOutcomes: {
+              entryLevel: [{ title: 'Entry-Level Position', salary: '55000-70000' }],
+              midCareer: [{ title: 'Mid-Career Position', salary: '75000-110000' }]
+            }
+          } : undefined,
+          certifications: [],
+          exams: [],
+          internships: [],
+          alternativePathways: []
+        });
       }
       setStep(3);
     } catch (err) {
       console.error('Error fetching pathway:', err);
-      setError(err instanceof Error ? err.message : 'Failed to generate pathway. Please try again.');
-      // Still show step 3 with fallback data
+      const errorMessage = err instanceof Error ? err.message : 'Failed to generate pathway. Please try again.';
+      setError(errorMessage);
+      // Set a minimal fallback pathway to prevent white screen
+      setPathway({
+        career: career,
+        degreeLevel: degree,
+        associates: {
+          programs: ['MDC Associate Program'],
+          duration: '2 years',
+          keyCourses: ['Core courses'],
+          financial: {
+            tuitionPerYear: '4000-6000',
+            housingPerMonth: '800-1200',
+            booksPerYear: '1200',
+            totalCost: '12000-18000'
+          },
+          careerOutcomes: {
+            entryLevel: [{ title: 'Entry-Level Position', salary: '35000-45000' }],
+            midCareer: [{ title: 'Mid-Career Position', salary: '50000-70000' }]
+          }
+        },
+        bachelors: degree === 'bachelor' ? {
+          universities: ['Transfer to 4-year university'],
+          duration: '2 years (after AA)',
+          keyCourses: ['Advanced courses'],
+          financial: {
+            tuitionPerYear: '8000-25000',
+            housingPerMonth: '1000-1500',
+            booksPerYear: '1500',
+            totalCost: '21000-35000'
+          },
+          careerOutcomes: {
+            entryLevel: [{ title: 'Entry-Level Position', salary: '55000-70000' }],
+            midCareer: [{ title: 'Mid-Career Position', salary: '75000-110000' }]
+          }
+        } : undefined,
+        certifications: [],
+        exams: [],
+        internships: [],
+        alternativePathways: []
+      });
       setStep(3);
     } finally {
       setLoading(false);
@@ -886,16 +1032,19 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                             ))}
                           </div>
                           {pathway.associates.keyCourses && pathway.associates.keyCourses.length > 0 && (
-                            <div className="mt-4 pt-4 border-t border-gray-200">
-                              <p className="text-sm font-semibold text-gray-900 mb-3">Key Courses:</p>
+                            <Accordion 
+                              title="Key Courses" 
+                              icon={<GraduationCap className="w-4 h-4" />}
+                              color="cyan"
+                            >
                               <div className="flex flex-wrap gap-2">
-                                {pathway.associates.keyCourses.map((course, idx) => (
+                                {pathway.associates.keyCourses.slice(0, 5).map((course, idx) => (
                                   <span key={idx} className="px-3 py-1.5 bg-cyan-50 text-cyan-700 rounded-md text-xs font-medium">
                                     {course}
                                   </span>
                                 ))}
                               </div>
-                            </div>
+                            </Accordion>
                           )}
                           
                           {/* Financial Data Accordion */}
@@ -977,37 +1126,6 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                             </Accordion>
                           )}
 
-                          {/* ROI Calculator Accordion */}
-                          {pathway.associates && (
-                            <Accordion 
-                              title="ROI Calculator" 
-                              icon={<TrendingUp className="w-4 h-4" />}
-                              color="cyan"
-                            >
-                              <div className="space-y-3 text-sm">
-                                <div className="bg-white/60 rounded-lg p-3">
-                                  <p className="text-xs text-gray-500 mb-2">Investment (2 years)</p>
-                                  <p className="text-2xl font-bold text-gray-900 mb-1">${parseInt(pathway.associates.roi.investment || '15000').toLocaleString()}</p>
-                                  <p className="text-xs text-gray-600">Average total cost</p>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div className="bg-gradient-to-br from-cyan-50 to-teal-50 rounded-lg p-3 border border-cyan-200">
-                                    <p className="text-xs text-gray-500 mb-1">10-Year Earnings</p>
-                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.associates.roi?.tenYearEarnings) || '400,000-500,000'}</p>
-                                  </div>
-                                  <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-lg p-3 border border-emerald-200">
-                                    <p className="text-xs text-gray-500 mb-1">ROI</p>
-                                    <p className="font-semibold text-emerald-600">{pathway.associates.roi.roiPercentage || '2,567'}%</p>
-                                  </div>
-                                </div>
-                                <div className="bg-white/60 rounded-lg p-3">
-                                  <p className="text-xs text-gray-500 mb-1">Break-Even Point</p>
-                                  <p className="font-semibold text-gray-900">~{pathway.associates.roi.breakEvenMonths || '6-8'} months</p>
-                                  <p className="text-xs text-gray-600 mt-1">Time to recover investment</p>
-                                </div>
-                              </div>
-                            </Accordion>
-                          )}
                         </div>
                       </motion.div>
                     )}
@@ -1048,6 +1166,21 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                 <p className="text-sm text-gray-700 leading-relaxed mb-2">{pathway.bachelors.articulationAgreements}</p>
                               )}
                             </div>
+                          )}
+                          {pathway.bachelors.keyCourses && pathway.bachelors.keyCourses.length > 0 && (
+                            <Accordion 
+                              title="Key Courses" 
+                              icon={<GraduationCap className="w-4 h-4" />}
+                              color="teal"
+                            >
+                              <div className="flex flex-wrap gap-2">
+                                {pathway.bachelors.keyCourses.slice(0, 5).map((course, idx) => (
+                                  <span key={idx} className="px-3 py-1.5 bg-teal-50 text-teal-700 rounded-md text-xs font-medium">
+                                    {course}
+                                  </span>
+                                ))}
+                              </div>
+                            </Accordion>
                           )}
 
                           {/* Financial Data Accordion */}
@@ -1129,37 +1262,6 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                             </Accordion>
                           )}
 
-                          {/* ROI Calculator Accordion */}
-                          {pathway.bachelors && (
-                            <Accordion 
-                              title="ROI Calculator" 
-                              icon={<TrendingUp className="w-4 h-4" />}
-                              color="teal"
-                            >
-                              <div className="space-y-3 text-sm">
-                                <div className="bg-white/60 rounded-lg p-3">
-                                  <p className="text-xs text-gray-500 mb-2">Investment (2 years)</p>
-                                  <p className="text-2xl font-bold text-gray-900 mb-1">${parseInt(pathway.bachelors.roi.investment || '28000').toLocaleString()}</p>
-                                  <p className="text-xs text-gray-600">Average total cost</p>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div className="bg-gradient-to-br from-teal-50 to-cyan-50 rounded-lg p-3 border border-teal-200">
-                                    <p className="text-xs text-gray-500 mb-1">10-Year Earnings</p>
-                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.bachelors.roi?.tenYearEarnings) || '600,000-800,000'}</p>
-                                  </div>
-                                  <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-lg p-3 border border-emerald-200">
-                                    <p className="text-xs text-gray-500 mb-1">ROI</p>
-                                    <p className="font-semibold text-emerald-600">{pathway.bachelors.roi.roiPercentage || '2,143'}%</p>
-                                  </div>
-                                </div>
-                                <div className="bg-white/60 rounded-lg p-3">
-                                  <p className="text-xs text-gray-500 mb-1">Break-Even Point</p>
-                                  <p className="font-semibold text-gray-900">~{pathway.bachelors.roi.breakEvenMonths || '5-7'} months</p>
-                                  <p className="text-xs text-gray-600 mt-1">Time to recover investment</p>
-                                </div>
-                              </div>
-                            </Accordion>
-                          )}
                         </div>
                       </motion.div>
                     )}
@@ -1235,9 +1337,9 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                       </motion.div>
                     )}
 
-                    {/* Certifications & Exams */}
-                    {(pathway?.certifications && pathway.certifications.length > 0) || 
-                     (pathway?.exams && pathway.exams.length > 0) ? (
+                    {/* Certifications & Exams - Only show if both exist and have content */}
+                    {((pathway?.certifications && Array.isArray(pathway.certifications) && pathway.certifications.length > 0) || 
+                      (pathway?.exams && Array.isArray(pathway.exams) && pathway.exams.length > 0)) ? (
                       <motion.div
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}

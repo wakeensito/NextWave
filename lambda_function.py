@@ -1,9 +1,11 @@
 import json
 import boto3
 import os
+import re
 from datetime import datetime
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
@@ -133,143 +135,151 @@ def validate_courses_against_mdc(courses, mdc_data):
     
     return valid_courses if valid_courses else courses  # Return validated or original
 
-def generate_pathway_with_gemini(career, degree_level):
-    """Call Gemini API to generate career pathway using REST API"""
+def get_mdc_context_for_career(career, degree_level):
+    """Helper function to get MDC program data and context - shared by both agents"""
+    mdc_data = None
+    related_program = None
+    
+    # Career to program mappings (expanded for better matching including typos)
+    career_mappings = {
+        'doctor': 'biology', 'physician': 'biology', 'medical': 'biology', 'surgeon': 'biology',
+        'lawyer': 'criminal-justice', 'attorney': 'criminal-justice', 'law': 'criminal-justice', 'legal': 'criminal-justice',
+        'engineer': 'engineering', 'engineering': 'engineering',
+        'architect': 'architecture', 'architecture': 'architecture',
+        'nurse': 'nursing', 'nursing': 'nursing', 'nusre': 'nursing',  # Handle typo
+        'business': 'business-administration', 'business administration': 'business-administration', 'business major': 'business-administration', 'accountant': 'accounting', 'accounting': 'accounting',
+        'teacher': 'education', 'education': 'education', 'teaching': 'education',
+        'computer': 'computer-science', 'programmer': 'computer-science', 'developer': 'computer-science', 'software': 'computer-science',
+        'data': 'computer-science', 'analyst': 'computer-science', 'analytics': 'computer-science', 'data analyst': 'computer-science'
+    }
+    
+    # Try exact match first
+    career_lower = career.lower()
+    for key, program in career_mappings.items():
+        if key in career_lower:
+            # Try to get program data - check both associate and bachelor if bachelor selected
+            mdc_data = get_mdc_program_data(program)
+            if mdc_data:
+                related_program = mdc_data['programName']
+                # If bachelor degree selected, also try to find bachelor's version
+                if degree_level == 'bachelor' and mdc_data.get('degreeType', '').lower() not in ['bachelor', 'bachelors', 'ba', 'bs']:
+                    # Try to find bachelor's version by scanning for bachelor programs
+                    try:
+                        scan_response = mdc_programs_table.scan(
+                            FilterExpression='contains(programName, :name) AND (contains(degreeType, :bachelor) OR contains(programName, :bachelor))',
+                            ExpressionAttributeValues={
+                                ':name': program,
+                                ':bachelor': 'bachelor'
+                            }
+                        )
+                        if scan_response.get('Items'):
+                            mdc_data = scan_response['Items'][0]
+                            related_program = mdc_data['programName']
+                    except:
+                        pass  # If scan fails, use associate data
+                break
+    
+    # If no match found, try partial word matching
+    if not mdc_data:
+        career_words = career_lower.split()
+        for word in career_words:
+            for key, program in career_mappings.items():
+                if key in word or word in key:
+                    mdc_data = get_mdc_program_data(program)
+                    if mdc_data:
+                        related_program = mdc_data['programName']
+                        # If bachelor degree selected, try to find bachelor's version
+                        if degree_level == 'bachelor' and mdc_data.get('degreeType', '').lower() not in ['bachelor', 'bachelors', 'ba', 'bs']:
+                            try:
+                                scan_response = mdc_programs_table.scan(
+                                    FilterExpression='contains(programName, :name) AND (contains(degreeType, :bachelor) OR contains(programName, :bachelor))',
+                                    ExpressionAttributeValues={
+                                        ':name': program,
+                                        ':bachelor': 'bachelor'
+                                    }
+                                )
+                                if scan_response.get('Items'):
+                                    mdc_data = scan_response['Items'][0]
+                                    related_program = mdc_data['programName']
+                            except:
+                                pass
+                        break
+            if mdc_data:
+                break
+    
+    # Build minimal MDC context if available
+    mdc_context = ""
+    if mdc_data and 'courses' in mdc_data and mdc_data['courses']:
+        sample_courses = mdc_data['courses'][:3]  # Reduced to 3 courses
+        course_examples = ", ".join([f"{c.get('code', '')}" for c in sample_courses if c.get('code')])
+        mdc_context = f"MDC courses: {course_examples}. "
+    
+    return mdc_data, related_program, mdc_context
+
+def get_static_financial_data(degree_level):
+    """Get static financial data - no AI needed, just standard MDC costs"""
+    if degree_level == 'bachelor':
+        return {
+            'associates': {
+                'tuitionPerYear': '4000-6000',
+                'housingPerMonth': '800-1200',
+                'booksPerYear': '1200',
+                'totalCost': '12000-18000'
+            },
+            'bachelors': {
+                'tuitionPerYear': '8000-25000',
+                'housingPerMonth': '1000-1500',
+                'booksPerYear': '1500',
+                'totalCost': '21000-35000'
+            }
+        }
+    else:
+        return {
+            'associates': {
+                'tuitionPerYear': '4000-6000',
+                'housingPerMonth': '800-1200',
+                'booksPerYear': '1200',
+                'totalCost': '12000-18000'
+            }
+        }
+
+def generate_pathway_structure(career, degree_level):
+    """Agent 1: Generate pathway structure (programs, courses, duration, etc.) - NO financial/career data"""
     try:
         api_key = get_gemini_api_key()
         
-        # Try to get MDC program data for the career (optional enhancement)
-        mdc_data = None
-        related_program = None
+        # Get MDC context (shared helper)
+        mdc_data, related_program, mdc_context = get_mdc_context_for_career(career, degree_level)
         
-        # Career to program mappings
-        career_mappings = {
-            'doctor': 'biology', 'physician': 'biology', 'medical': 'biology',
-            'lawyer': 'criminal-justice', 'attorney': 'criminal-justice', 'law': 'criminal-justice',
-            'engineer': 'engineering', 'engineering': 'engineering',
-            'architect': 'architecture', 'architecture': 'architecture',
-            'nurse': 'nursing', 'nursing': 'nursing',
-            'business': 'business-administration', 'business administration': 'business-administration', 'business major': 'business-administration', 'accountant': 'accounting', 'accounting': 'accounting',
-            'teacher': 'education', 'education': 'education',
-            'computer': 'computer-science', 'programmer': 'computer-science', 'developer': 'computer-science'
-        }
+        # Adjust prompt based on degree level
+        if degree_level == 'bachelor':
+            pathway_instruction = f"Generate an educational pathway to become a {career} with a Bachelor's degree at Miami Dade College (MDC). MDC offers 18 Bachelor's degree programs directly. If MDC doesn't offer a Bachelor's in this field, include transfer options to complete the Bachelor's at another university."
+            bachelors_instruction = 'ALWAYS include bachelors section. If MDC offers this Bachelor\'s program, list "Miami Dade College" in universities. Otherwise, list transfer universities.'
+        else:
+            pathway_instruction = f"Generate an educational pathway to become a {career} starting with an Associate's degree at Miami Dade College (MDC)."
+            bachelors_instruction = 'Include bachelors section if relevant for this career.'
         
-        for key, program in career_mappings.items():
-            if key in career.lower():
-                mdc_data = get_mdc_program_data(program)
-                if mdc_data:
-                    related_program = mdc_data['programName']
-                    break
+        # Simplified prompt - NO financial or careerOutcomes
+        # Handle non-traditional careers by suggesting related educational pathways
+        prompt = f"""You are a career advisor helping a student pursue a {career} career. {pathway_instruction}
+
+IMPORTANT: Even if "{career}" is not an exact MDC program, suggest the closest related educational pathway. For example:
+- "Data Analyst" → Computer Science or Business Analytics pathway
+- "Software Engineer" → Computer Science pathway  
+- "Nurse Practitioner" → Nursing pathway
+- "Anime" or "Animation" → Digital Media, Graphic Design, or Computer Science pathway
+- Handle typos and creative careers by finding the closest educational match
+
+{mdc_context}Return JSON: career, degreeLevel, note (a clear, concise 2-3 sentence personalized message as a career advisor), associates {{programs, duration, keyCourses (limit to 5 courses)}}, bachelors {{universities (use "Miami Dade College" if MDC offers this Bachelor's program, otherwise list transfer universities), duration, keyCourses (limit to 5 courses), articulationAgreements}}, masters, professionalDegree, certifications (ONLY include if absolutely required for this career - omit entirely if not needed), exams (ONLY include if absolutely required for this career - omit entirely if not needed), internships.
+
+ALWAYS include associates section (MDC Associate's degree). {bachelors_instruction} 
+
+CRITICAL: 
+- Do NOT include certifications or exams fields at all if they are not required
+- ALWAYS include note field with a personalized, clear 2-3 sentence advisor message
+- Be specific and actionable in your advice"""
         
-        # Build simple MDC context if available
-        mdc_context = ""
-        if mdc_data and 'courses' in mdc_data and mdc_data['courses']:
-            sample_courses = mdc_data['courses'][:10]  # First 10 courses
-            course_examples = "\n".join([f"- {c.get('code', '')} - {c.get('name', '')}" for c in sample_courses if c.get('code')])
-            mdc_context = f"\n\nMDC Program Context: Here are actual courses from the {related_program} program:\n{course_examples}\n\nWhen listing courses, use the format: \"CODE XXXX - Course Name\" (e.g., \"ENC 1101 - English Composition I\")."
-        
-        prompt = f"""You are an experienced academic advisor at Miami Dade College (MDC) helping a student plan their educational pathway to become a {career}. Provide guidance in a supportive, encouraging, and professional advisor tone.
-
-Generate a comprehensive educational pathway for becoming a {career} starting with a {degree_level} degree.
-
-The pathway should include:
-1. Associate's degree (A.A./A.S.) - specific MDC programs if applicable
-2. Bachelor's degree (B.S.) - transfer plan and target universities
-3. Master's degree (M.S.) - if relevant
-4. Ph.D. or Professional degree (M.D., J.D., etc.) - if relevant
-5. Required certifications and exams (e.g., FE, PE for engineering, MCAT for medical school)
-6. Internships or practical experience opportunities
-7. Articulation agreements from MDC to other institutions
-8. Financial information (tuition, housing, books, total cost)
-9. Career outcomes (entry-level and mid-career job titles and salaries)
-10. ROI calculation (investment, 10-year earnings, ROI percentage, break-even months)
-
-{mdc_context}
-
-Format the response as JSON with this structure:
-{{
-  "career": "{career}",
-  "degreeLevel": "{degree_level}",
-  "associates": {{
-    "programs": ["Program 1", "Program 2"],
-    "duration": "2 years",
-    "keyCourses": ["Course 1", "Course 2"],
-    "financial": {{
-      "tuitionPerYear": "4000-6000",
-      "housingPerMonth": "800-1200",
-      "booksPerYear": "1200",
-      "totalCost": "12000-18000"
-    }},
-    "careerOutcomes": {{
-      "entryLevel": [
-        {{"title": "Job Title 1", "salary": "35000-45000"}},
-        {{"title": "Job Title 2", "salary": "30000-40000"}}
-      ],
-      "midCareer": [
-        {{"title": "Job Title 3", "salary": "50000-70000"}}
-      ]
-    }},
-    "roi": {{
-      "investment": "15000",
-      "tenYearEarnings": "400000-500000",
-      "roiPercentage": "2567",
-      "breakEvenMonths": "6-8"
-    }}
-  }},
-  "bachelors": {{
-    "universities": ["University 1", "University 2"],
-    "articulationAgreements": ["Agreement details"],
-    "duration": "2 years (after AA)",
-    "keyCourses": ["Course 1", "Course 2"],
-    "financial": {{
-      "tuitionPerYear": "8000-25000",
-      "housingPerMonth": "1000-1500",
-      "booksPerYear": "1500",
-      "totalCost": "21000-35000"
-    }},
-    "careerOutcomes": {{
-      "entryLevel": [
-        {{"title": "Job Title 1", "salary": "55000-70000"}},
-        {{"title": "Job Title 2", "salary": "50000-65000"}}
-      ],
-      "midCareer": [
-        {{"title": "Job Title 3", "salary": "75000-110000"}}
-      ]
-    }},
-    "roi": {{
-      "investment": "28000",
-      "tenYearEarnings": "600000-800000",
-      "roiPercentage": "2143",
-      "breakEvenMonths": "5-7"
-    }}
-  }},
-  "masters": {{
-    "universities": ["University 1"],
-    "duration": "2 years",
-    "required": true/false
-  }},
-  "professionalDegree": {{
-    "type": "M.D./J.D./Ph.D. etc.",
-    "universities": ["University 1"],
-    "duration": "4 years",
-    "required": true/false,
-    "description": "Details about the professional degree needed"
-  }},
-  "certifications": [
-    {{"name": "Cert Name", "required": true, "timing": "After BS"}}
-  ],
-  "exams": [
-    {{"name": "Exam Name", "required": true, "timing": "After BS"}}
-  ],
-  "internships": ["Internship opportunity 1", "Internship opportunity 2"],
-  "alternativePathways": ["Alternative path 1", "Alternative path 2"]
-}}
-
-Be specific and realistic. Focus on MDC (Miami Dade College) programs when applicable. 
-
-CRITICAL: You MUST include the financial, careerOutcomes, and roi fields for both associates and bachelors degrees. These fields are required and must contain realistic data. Do not omit them."""
-        
-        # Use Gemini REST API - v1beta endpoint with gemini-2.5-flash (available model)
+        # Use Gemini REST API - v1beta endpoint with gemini-2.5-flash
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
         
         payload = {
@@ -316,50 +326,96 @@ CRITICAL: You MUST include the financial, careerOutcomes, and roi fields for bot
         elif '```' in response_text:
             response_text = response_text.split('```')[1].split('```')[0]
         
-        pathway_data = json.loads(response_text.strip())
+        # Try to parse JSON with error handling
+        try:
+            pathway_data = json.loads(response_text.strip())
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {str(e)}")
+            print(f"Response text (first 500 chars): {response_text[:500]}")
+            # Try to find JSON object in the text
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                try:
+                    pathway_data = json.loads(json_match.group(0))
+                    print("Successfully extracted JSON from text")
+                except:
+                    raise Exception(f"Failed to parse JSON from Gemini response. Error: {str(e)}. Response preview: {response_text[:200]}")
+            else:
+                raise Exception(f"Failed to parse JSON from Gemini response. Error: {str(e)}. Response preview: {response_text[:200]}")
         
-        # Ensure financial, careerOutcomes, and roi fields exist (required for accordions)
-        if 'associates' in pathway_data:
-            if 'financial' not in pathway_data['associates']:
-                pathway_data['associates']['financial'] = {
-                    'tuitionPerYear': '4000-6000',
-                    'housingPerMonth': '800-1200',
-                    'booksPerYear': '1200',
-                    'totalCost': '12000-18000'
-                }
-            if 'careerOutcomes' not in pathway_data['associates']:
-                pathway_data['associates']['careerOutcomes'] = {
-                    'entryLevel': [{'title': 'Entry-Level Position', 'salary': '35000-45000'}],
-                    'midCareer': [{'title': 'Mid-Career Position', 'salary': '50000-70000'}]
-                }
-            if 'roi' not in pathway_data['associates']:
-                pathway_data['associates']['roi'] = {
-                    'investment': '15000',
-                    'tenYearEarnings': '400000-500000',
-                    'roiPercentage': '2567',
-                    'breakEvenMonths': '6-8'
-                }
+        # Remove certifications/exams if they're empty or not meaningful
+        # Only keep them if they have actual content with valid entries
+        if 'certifications' in pathway_data:
+            if not pathway_data['certifications'] or len(pathway_data['certifications']) == 0:
+                # Remove empty certifications
+                del pathway_data['certifications']
+            else:
+                # Filter out invalid entries (empty strings, None, etc.)
+                valid_certs = []
+                for cert in pathway_data['certifications']:
+                    if isinstance(cert, dict):
+                        if cert.get('name') or cert.get('title'):
+                            valid_certs.append(cert)
+                    elif isinstance(cert, str) and cert.strip():
+                        valid_certs.append(cert)
+                if valid_certs:
+                    pathway_data['certifications'] = valid_certs
+                else:
+                    del pathway_data['certifications']
         
-        if 'bachelors' in pathway_data:
-            if 'financial' not in pathway_data['bachelors']:
-                pathway_data['bachelors']['financial'] = {
-                    'tuitionPerYear': '8000-25000',
-                    'housingPerMonth': '1000-1500',
-                    'booksPerYear': '1500',
-                    'totalCost': '21000-35000'
-                }
-            if 'careerOutcomes' not in pathway_data['bachelors']:
-                pathway_data['bachelors']['careerOutcomes'] = {
-                    'entryLevel': [{'title': 'Entry-Level Position', 'salary': '55000-70000'}],
-                    'midCareer': [{'title': 'Mid-Career Position', 'salary': '75000-110000'}]
-                }
-            if 'roi' not in pathway_data['bachelors']:
-                pathway_data['bachelors']['roi'] = {
-                    'investment': '28000',
-                    'tenYearEarnings': '600000-800000',
-                    'roiPercentage': '2143',
-                    'breakEvenMonths': '5-7'
-                }
+        if 'exams' in pathway_data:
+            if not pathway_data['exams'] or len(pathway_data['exams']) == 0:
+                # Remove empty exams
+                del pathway_data['exams']
+            else:
+                # Filter out invalid entries
+                valid_exams = []
+                for exam in pathway_data['exams']:
+                    if isinstance(exam, dict):
+                        if exam.get('name') or exam.get('title'):
+                            valid_exams.append(exam)
+                    elif isinstance(exam, str) and exam.strip():
+                        valid_exams.append(exam)
+                if valid_exams:
+                    pathway_data['exams'] = valid_exams
+                else:
+                    del pathway_data['exams']
+        
+        # Limit keyCourses to 5 for both associates and bachelors
+        if 'associates' in pathway_data and 'keyCourses' in pathway_data['associates']:
+            if isinstance(pathway_data['associates']['keyCourses'], list):
+                pathway_data['associates']['keyCourses'] = pathway_data['associates']['keyCourses'][:5]
+        if 'bachelors' in pathway_data and 'keyCourses' in pathway_data['bachelors']:
+            if isinstance(pathway_data['bachelors']['keyCourses'], list):
+                pathway_data['bachelors']['keyCourses'] = pathway_data['bachelors']['keyCourses'][:5]
+        
+        # Ensure associates section always exists
+        if 'associates' not in pathway_data:
+            pathway_data['associates'] = {
+                'programs': [f'MDC {career} Associate Program'],
+                'duration': '2 years',
+                'keyCourses': ['Core courses']
+            }
+        
+        # If bachelor degree level selected, ensure bachelors section exists
+        if degree_level == 'bachelor':
+            if 'bachelors' not in pathway_data:
+                mdc_bachelor_program = None
+                if mdc_data and mdc_data.get('degreeType', '').lower() in ['bachelor', 'bachelors', 'ba', 'bs']:
+                    mdc_bachelor_program = mdc_data['programName']
+                
+                if mdc_bachelor_program:
+                    pathway_data['bachelors'] = {
+                        'universities': ['Miami Dade College'],
+                        'duration': '4 years',
+                        'keyCourses': ['Advanced courses']
+                    }
+                else:
+                    pathway_data['bachelors'] = {
+                        'universities': ['Transfer to 4-year university'],
+                        'duration': '2 years (after AA)',
+                        'keyCourses': ['Advanced courses']
+                    }
         
         # Optionally validate courses against MDC data (non-blocking)
         if mdc_data and 'associates' in pathway_data and 'keyCourses' in pathway_data['associates']:
@@ -374,43 +430,154 @@ CRITICAL: You MUST include the financial, careerOutcomes, and roi fields for bot
         # Add related MDC program if found
         if related_program:
             pathway_data['relatedMDCProgram'] = related_program
-        
-        # Skip College Scorecard API - it was causing timeouts
-        # Gemini will provide financial data in the response, which is sufficient
-        # The MDC data from DynamoDB is already being used for course validation
-        
-        # Remove raw response from final output (too large for DynamoDB)
-        # Keep it only for debugging if needed
-        if 'rawResponse' in pathway_data:
-            del pathway_data['rawResponse']
-        
+
+        # Ensure note (advisorNote) exists - if not, create a default one
+        if 'note' not in pathway_data and 'advisorNote' in pathway_data:
+            pathway_data['note'] = pathway_data['advisorNote']
+        elif 'note' not in pathway_data or not pathway_data.get('note'):
+            pathway_data['note'] = f"Starting with an Associate's degree at MDC provides a solid foundation for your {career} career. Focus on building core skills and maintaining strong academic performance to maximize your opportunities."
+
+        # Always include rawResponse for successful calls
+        pathway_data['rawResponse'] = response_text.strip()
+
         return pathway_data
         
     except Exception as e:
         error_msg = str(e)
-        print(f"Error calling Gemini: {error_msg}")
-        # Log full error for debugging
+        print(f"Error in Agent 1 (pathway structure): {error_msg}")
         import traceback
         print(f"Traceback: {traceback.format_exc()}")
-        # Return a fallback pathway structure with error info
-        return {
-            "error": error_msg,
+        # Return minimal fallback - ensure bachelors is always a dict or None, never other types
+        fallback = {
             "career": career,
             "degreeLevel": degree_level,
             "associates": {
-                "programs": ["MDC Associate Program"],
+                "programs": [f"MDC {career} Pathway"],
                 "duration": "2 years",
                 "keyCourses": ["Core courses"]
             },
-            "bachelors": {
+            "certifications": [],
+            "exams": [],
+            "internships": []
+        }
+        if degree_level == 'bachelor':
+            fallback["bachelors"] = {
                 "universities": ["Transfer to 4-year university"],
                 "duration": "2 years (after AA)",
                 "keyCourses": ["Advanced courses"]
+            }
+        return fallback
+
+def generate_career_outcomes(career, degree_level):
+    """Agent 2: Generate career outcomes (entry-level and mid-career salaries)"""
+    try:
+        api_key = get_gemini_api_key()
+        
+        # Simple, focused prompt for career outcomes only - ALWAYS return specific jobs
+        prompt = f"""You are a career advisor providing job market insights for a {career} career path.
+
+Generate SPECIFIC, REALISTIC job titles and salary data. DO NOT use generic placeholders like f"{career} Professional" or "Job Title".
+
+Return JSON with careerOutcomes for both associates and bachelors degrees:
+{{
+  "associates": {{
+    "careerOutcomes": {{
+      "entryLevel": [{{"title": "Specific Job Title 1", "salary": "45000-55000"}}, {{"title": "Specific Job Title 2", "salary": "48000-52000"}}],
+      "midCareer": [{{"title": "Specific Job Title 3", "salary": "60000-75000"}}, {{"title": "Specific Job Title 4", "salary": "65000-80000"}}]
+    }}
+  }},
+  "bachelors": {{
+    "careerOutcomes": {{
+      "entryLevel": [{{"title": "Specific Job Title 1", "salary": "55000-70000"}}, {{"title": "Specific Job Title 2", "salary": "60000-75000"}}],
+      "midCareer": [{{"title": "Specific Job Title 3", "salary": "75000-110000"}}, {{"title": "Specific Job Title 4", "salary": "85000-120000"}}]
+    }}
+  }}
+}}
+
+CRITICAL: 
+- Use REAL job titles specific to {career} (e.g., "Registered Nurse", "Software Developer", "Business Analyst")
+- Include 2-3 specific job titles per category
+- Use realistic salary ranges based on actual market data
+- NEVER use generic placeholders"""
+        
+        # Use Gemini REST API
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        
+        payload = {
+            "contents": [{
+                "parts": [{
+                    "text": prompt
+                }]
+            }]
+        }
+        
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+        
+        try:
+            with urllib.request.urlopen(req, timeout=20) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                
+                if 'error' in result:
+                    error_detail = result['error']
+                    raise Exception(f"Gemini API error: {error_detail.get('message', str(error_detail))}")
+                
+                if 'candidates' not in result or len(result['candidates']) == 0:
+                    raise Exception(f"No candidates in Gemini response")
+                
+                if 'content' not in result['candidates'][0] or 'parts' not in result['candidates'][0]['content']:
+                    raise Exception(f"Invalid response structure")
+                    
+                response_text = result['candidates'][0]['content']['parts'][0]['text']
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode('utf-8') if hasattr(e, 'read') else str(e)
+            print(f"HTTP Error {e.code}: {error_body}")
+            try:
+                error_json = json.loads(error_body)
+                error_msg = error_json.get('error', {}).get('message', error_body)
+            except:
+                error_msg = error_body
+            raise Exception(f"Gemini API HTTP {e.code}: {error_msg}")
+        
+        # Extract JSON
+        if '```json' in response_text:
+            response_text = response_text.split('```json')[1].split('```')[0]
+        elif '```' in response_text:
+            response_text = response_text.split('```')[1].split('```')[0]
+        
+        # Parse JSON
+        try:
+            career_data = json.loads(response_text.strip())
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error in Agent 2: {str(e)}")
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                try:
+                    career_data = json.loads(json_match.group(0))
+                except:
+                    raise Exception(f"Failed to parse JSON from Agent 2. Error: {str(e)}")
+            else:
+                raise Exception(f"Failed to parse JSON from Agent 2. Error: {str(e)}")
+        
+        return career_data
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Error in Agent 2 (career outcomes): {error_msg}")
+        # Return fallback career outcomes with career-specific titles
+        return {
+            "associates": {
+                "careerOutcomes": {
+                    "entryLevel": [{"title": f"{career} Assistant", "salary": "35000-45000"}],
+                    "midCareer": [{"title": f"{career} Specialist", "salary": "50000-70000"}]
+                }
             },
-            "certifications": [],
-            "exams": [],
-            "internships": [],
-            "alternativePathways": []
+            "bachelors": {
+                "careerOutcomes": {
+                    "entryLevel": [{"title": f"{career} Professional", "salary": "55000-70000"}],
+                    "midCareer": [{"title": f"Senior {career}", "salary": "75000-110000"}]
+                }
+            }
         }
 
 def lambda_handler(event, context):
@@ -470,8 +637,225 @@ def lambda_handler(event, context):
         except Exception as e:
             print(f"DynamoDB read error: {str(e)}")
         
-        # Not in cache, generate with Gemini
-        pathway_data = generate_pathway_with_gemini(career, degree_level)
+        # Not in cache, generate with 2 agents in parallel
+        pathway_data = None
+        career_data = None
+        
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            # Submit both agents to run in parallel
+            pathway_future = executor.submit(generate_pathway_structure, career, degree_level)
+            career_future = executor.submit(generate_career_outcomes, career, degree_level)
+            
+            # Wait for both to complete
+            try:
+                pathway_data = pathway_future.result(timeout=30)
+            except Exception as e:
+                print(f"Agent 1 (pathway) failed: {str(e)}")
+                pathway_data = {
+                    "career": career,
+                    "degreeLevel": degree_level,
+                    "associates": {
+                        "programs": [f"MDC {career} Pathway"],
+                        "duration": "2 years",
+                        "keyCourses": ["Core courses"]
+                    },
+                    "bachelors": {
+                        "universities": ["Transfer to 4-year university"],
+                        "duration": "2 years (after AA)",
+                        "keyCourses": ["Advanced courses"]
+                    } if degree_level == 'bachelor' else None,
+                    "certifications": [],
+                    "exams": [],
+                    "internships": [],
+                    "note": f"Starting with an Associate's degree at MDC provides a solid foundation for your {career} career. Focus on building core skills and maintaining strong academic performance to maximize your opportunities."
+                }
+            
+            try:
+                career_data = career_future.result(timeout=25)
+            except Exception as e:
+                print(f"Agent 2 (career outcomes) failed: {str(e)}")
+                career_data = {
+                    "associates": {
+                        "careerOutcomes": {
+                            "entryLevel": [{"title": f"{career} Assistant", "salary": "35000-45000"}],
+                            "midCareer": [{"title": f"{career} Specialist", "salary": "50000-70000"}]
+                        }
+                    },
+                    "bachelors": {
+                        "careerOutcomes": {
+                            "entryLevel": [{"title": f"{career} Professional", "salary": "55000-70000"}],
+                            "midCareer": [{"title": f"Senior {career}", "salary": "75000-110000"}]
+                        }
+                    }
+                }
+        
+        # Merge results from both agents
+        # Get static financial data (no AI needed)
+        financial_data = get_static_financial_data(degree_level)
+        
+        # Ensure pathway_data is a dict
+        if not isinstance(pathway_data, dict):
+            print(f"Warning: pathway_data is not a dict: {type(pathway_data)}")
+            pathway_data = {}
+        
+        # Ensure associates always exists
+        if 'associates' not in pathway_data or not pathway_data.get('associates'):
+            pathway_data['associates'] = {
+                'programs': [f'MDC {career} Associate Program'],
+                'duration': '2 years',
+                'keyCourses': ['Core courses']
+            }
+        
+        # Ensure associates is a dict
+        if not isinstance(pathway_data['associates'], dict):
+            pathway_data['associates'] = {
+                'programs': [f'MDC {career} Associate Program'],
+                'duration': '2 years',
+                'keyCourses': ['Core courses']
+            }
+        
+        # Add financial and career outcomes to associates
+        pathway_data['associates']['financial'] = financial_data.get('associates', {
+            'tuitionPerYear': '4000-6000',
+            'housingPerMonth': '800-1200',
+            'booksPerYear': '1200',
+            'totalCost': '12000-18000'
+        })
+        if career_data and isinstance(career_data, dict) and 'associates' in career_data and 'careerOutcomes' in career_data['associates']:
+            # Validate career outcomes have actual content
+            assoc_outcomes = career_data['associates']['careerOutcomes']
+            if assoc_outcomes.get('entryLevel') and len(assoc_outcomes['entryLevel']) > 0:
+                # Filter out generic placeholders
+                valid_entry = [job for job in assoc_outcomes['entryLevel'] if job.get('title') and 'entry-level' not in job.get('title', '').lower() and 'position' not in job.get('title', '').lower() and 'job title' not in job.get('title', '').lower()]
+                if valid_entry:
+                    pathway_data['associates']['careerOutcomes'] = {
+                        'entryLevel': valid_entry,
+                        'midCareer': [job for job in assoc_outcomes.get('midCareer', []) if job.get('title') and 'mid-career' not in job.get('title', '').lower() and 'position' not in job.get('title', '').lower()] if assoc_outcomes.get('midCareer') else []
+                    }
+                else:
+                    # Use fallback with career-specific titles
+                    pathway_data['associates']['careerOutcomes'] = {
+                        'entryLevel': [{"title": f"{career} Assistant", "salary": "35000-45000"}],
+                        'midCareer': [{"title": f"{career} Specialist", "salary": "50000-70000"}]
+                    }
+            else:
+                pathway_data['associates']['careerOutcomes'] = {
+                    'entryLevel': [{"title": f"{career} Assistant", "salary": "35000-45000"}],
+                    'midCareer': [{"title": f"{career} Specialist", "salary": "50000-70000"}]
+                }
+        else:
+            pathway_data['associates']['careerOutcomes'] = {
+                'entryLevel': [{"title": f"{career} Assistant", "salary": "35000-45000"}],
+                'midCareer': [{"title": f"{career} Specialist", "salary": "50000-70000"}]
+            }
+        
+        # Handle bachelors - only if degree_level is bachelor or if bachelors section exists
+        if degree_level == 'bachelor':
+            if 'bachelors' not in pathway_data or not pathway_data.get('bachelors'):
+                pathway_data['bachelors'] = {
+                    'universities': ['Transfer to 4-year university'],
+                    'duration': '2 years (after AA)',
+                    'keyCourses': ['Advanced courses']
+                }
+            
+            # Ensure bachelors is a dict
+            if not isinstance(pathway_data['bachelors'], dict):
+                pathway_data['bachelors'] = {
+                    'universities': ['Transfer to 4-year university'],
+                    'duration': '2 years (after AA)',
+                    'keyCourses': ['Advanced courses']
+                }
+            
+            pathway_data['bachelors']['financial'] = financial_data.get('bachelors', {
+                'tuitionPerYear': '8000-25000',
+                'housingPerMonth': '1000-1500',
+                'booksPerYear': '1500',
+                'totalCost': '21000-35000'
+            })
+            if career_data and isinstance(career_data, dict) and 'bachelors' in career_data and 'careerOutcomes' in career_data['bachelors']:
+                # Validate career outcomes have actual content
+                bach_outcomes = career_data['bachelors']['careerOutcomes']
+                if bach_outcomes.get('entryLevel') and len(bach_outcomes['entryLevel']) > 0:
+                    # Filter out generic placeholders
+                    valid_entry = [job for job in bach_outcomes['entryLevel'] if job.get('title') and 'entry-level' not in job.get('title', '').lower() and 'position' not in job.get('title', '').lower() or 'job title' not in job.get('title', '').lower()]
+                    if valid_entry:
+                        pathway_data['bachelors']['careerOutcomes'] = {
+                            'entryLevel': valid_entry,
+                            'midCareer': [job for job in bach_outcomes.get('midCareer', []) if job.get('title') and 'mid-career' not in job.get('title', '').lower() and 'position' not in job.get('title', '').lower()] if bach_outcomes.get('midCareer') else []
+                        }
+                    else:
+                        pathway_data['bachelors']['careerOutcomes'] = {
+                            'entryLevel': [{"title": f"{career} Professional", "salary": "55000-70000"}],
+                            'midCareer': [{"title": f"Senior {career}", "salary": "75000-110000"}]
+                        }
+                else:
+                    pathway_data['bachelors']['careerOutcomes'] = {
+                        'entryLevel': [{"title": f"{career} Professional", "salary": "55000-70000"}],
+                        'midCareer': [{"title": f"Senior {career}", "salary": "75000-110000"}]
+                    }
+            else:
+                pathway_data['bachelors']['careerOutcomes'] = {
+                    'entryLevel': [{"title": f"{career} Professional", "salary": "55000-70000"}],
+                    'midCareer': [{"title": f"Senior {career}", "salary": "75000-110000"}]
+                }
+        elif 'bachelors' in pathway_data and pathway_data.get('bachelors'):
+            # If bachelors exists but degree_level is not bachelor, still add financial/career data
+            if isinstance(pathway_data['bachelors'], dict):
+                pathway_data['bachelors']['financial'] = financial_data.get('bachelors', {
+                    'tuitionPerYear': '8000-25000',
+                    'housingPerMonth': '1000-1500',
+                    'booksPerYear': '1500',
+                    'totalCost': '21000-35000'
+                })
+                if career_data and isinstance(career_data, dict) and 'bachelors' in career_data and 'careerOutcomes' in career_data['bachelors']:
+                    # Validate career outcomes have actual content
+                    bach_outcomes = career_data['bachelors']['careerOutcomes']
+                    if bach_outcomes.get('entryLevel') and len(bach_outcomes['entryLevel']) > 0:
+                        # Filter out generic placeholders
+                        valid_entry = [job for job in bach_outcomes['entryLevel'] if job.get('title') and 'entry-level' not in job.get('title', '').lower() and 'position' not in job.get('title', '').lower() and 'job title' not in job.get('title', '').lower()]
+                        if valid_entry:
+                            pathway_data['bachelors']['careerOutcomes'] = {
+                                'entryLevel': valid_entry,
+                                'midCareer': [job for job in bach_outcomes.get('midCareer', []) if job.get('title') and 'mid-career' not in job.get('title', '').lower() and 'position' not in job.get('title', '').lower()] if bach_outcomes.get('midCareer') else []
+                            }
+                        else:
+                            pathway_data['bachelors']['careerOutcomes'] = {
+                                'entryLevel': [{"title": f"{career} Professional", "salary": "55000-70000"}],
+                                'midCareer': [{"title": f"Senior {career}", "salary": "75000-110000"}]
+                            }
+                    else:
+                        pathway_data['bachelors']['careerOutcomes'] = {
+                            'entryLevel': [{"title": f"{career} Professional", "salary": "55000-70000"}],
+                            'midCareer': [{"title": f"Senior {career}", "salary": "75000-110000"}]
+                        }
+                else:
+                    pathway_data['bachelors']['careerOutcomes'] = {
+                        'entryLevel': [{"title": f"{career} Professional", "salary": "55000-70000"}],
+                        'midCareer': [{"title": f"Senior {career}", "salary": "75000-110000"}]
+                    }
+        
+        # Ensure required fields exist
+        if 'career' not in pathway_data:
+            pathway_data['career'] = career
+        if 'degreeLevel' not in pathway_data:
+            pathway_data['degreeLevel'] = degree_level
+        
+        # Ensure note exists (advisor message)
+        if 'note' not in pathway_data or not pathway_data.get('note'):
+            pathway_data['note'] = f"Starting with an Associate's degree at MDC provides a solid foundation for your {career} career. Focus on building core skills and maintaining strong academic performance to maximize your opportunities."
+        
+        # Only add certifications/exams if they don't exist (don't override if they were deleted)
+        # If they were deleted by the filtering logic above, they won't be in the dict, which is correct
+        # Only add empty arrays if the field is completely missing (shouldn't happen after filtering)
+        if 'certifications' not in pathway_data:
+            # Don't add empty array - let it be undefined
+            pass
+        if 'exams' not in pathway_data:
+            # Don't add empty array - let it be undefined
+            pass
+        
+        if 'internships' not in pathway_data:
+            pathway_data['internships'] = []
         
         # Store in DynamoDB
         try:

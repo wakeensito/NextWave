@@ -134,11 +134,11 @@ def validate_courses_against_mdc(courses, mdc_data):
     return valid_courses if valid_courses else courses  # Return validated or original
 
 def generate_pathway_with_gemini(career, degree_level):
-    """Call Gemini API to generate career pathway using REST API with MDC data validation"""
+    """Call Gemini API to generate career pathway using REST API"""
     try:
         api_key = get_gemini_api_key()
         
-        # Try to get MDC program data for the career
+        # Try to get MDC program data for the career (optional enhancement)
         mdc_data = None
         related_program = None
         
@@ -149,7 +149,7 @@ def generate_pathway_with_gemini(career, degree_level):
             'engineer': 'engineering', 'engineering': 'engineering',
             'architect': 'architecture', 'architecture': 'architecture',
             'nurse': 'nursing', 'nursing': 'nursing',
-            'business': 'business-administration', 'accountant': 'accounting',
+            'business': 'business-administration', 'business administration': 'business-administration', 'business major': 'business-administration', 'accountant': 'accounting', 'accounting': 'accounting',
             'teacher': 'education', 'education': 'education',
             'computer': 'computer-science', 'programmer': 'computer-science', 'developer': 'computer-science'
         }
@@ -161,45 +161,37 @@ def generate_pathway_with_gemini(career, degree_level):
                     related_program = mdc_data['programName']
                     break
         
-        # Build MDC context for prompt
+        # Build simple MDC context if available
         mdc_context = ""
         if mdc_data and 'courses' in mdc_data and mdc_data['courses']:
-            sample_courses = mdc_data['courses'][:15]  # First 15 courses
+            sample_courses = mdc_data['courses'][:10]  # First 10 courses
             course_examples = "\n".join([f"- {c.get('code', '')} - {c.get('name', '')}" for c in sample_courses if c.get('code')])
-            mdc_context = f"""
-
-IMPORTANT - Use ONLY actual MDC courses when recommending courses. Here are real courses from the {related_program} program:
-{course_examples}
-
-When listing courses, use the exact format: "CODE XXXX - Course Name" (e.g., "ENC 1101 - English Composition I")."""
+            mdc_context = f"\n\nMDC Program Context: Here are actual courses from the {related_program} program:\n{course_examples}\n\nWhen listing courses, use the format: \"CODE XXXX - Course Name\" (e.g., \"ENC 1101 - English Composition I\")."
         
-        prompt = f"""You are an experienced academic advisor at Miami Dade College (MDC) helping a student plan their educational pathway to become a {career}. Provide guidance in a supportive, encouraging, and professional advisor tone. Be warm, clear, and helpful.
+        prompt = f"""You are an experienced academic advisor at Miami Dade College (MDC) helping a student plan their educational pathway to become a {career}. Provide guidance in a supportive, encouraging, and professional advisor tone.
 
-IMPORTANT: If "{career}" is not a specific career that MDC offers direct programs for (like "Doctor" or "Physician"), suggest the closest related MDC program that leads to that career. For example:
-- "Doctor" → Suggest "Biology" or "Pre-Med" pathway that leads to medical school
-- "Lawyer" → Suggest "Pre-Law" or "Criminal Justice" pathway
-- "Engineer" → Suggest specific engineering pathway (Mechanical, Civil, etc.)
+Generate a comprehensive educational pathway for becoming a {career} starting with a {degree_level} degree.
 
-{mdc_context}
-
-CRITICAL: When listing courses in the "keyCourses" field, use ONLY actual MDC course codes and names. Course codes follow the format: "XXX XXXX" (e.g., "ENC 1101", "MAC 2311", "BSC 2010"). Do not make up course codes or names. Use the exact course codes and names provided above if available.
-
-As an advisor, provide a comprehensive educational pathway that includes:
-1. Associate's degree (A.A./A.S.) - specific MDC programs if applicable. If the exact career isn't available at MDC, suggest the closest related program (e.g., Biology for Doctor, Pre-Engineering for Engineer)
+The pathway should include:
+1. Associate's degree (A.A./A.S.) - specific MDC programs if applicable
 2. Bachelor's degree (B.S.) - transfer plan and target universities
 3. Master's degree (M.S.) - if relevant
 4. Ph.D. or Professional degree (M.D., J.D., etc.) - if relevant
 5. Required certifications and exams (e.g., FE, PE for engineering, MCAT for medical school)
 6. Internships or practical experience opportunities
 7. Articulation agreements from MDC to other institutions
+8. Financial information (tuition, housing, books, total cost)
+9. Career outcomes (entry-level and mid-career job titles and salaries)
+10. ROI calculation (investment, 10-year earnings, ROI percentage, break-even months)
+
+{mdc_context}
 
 Format the response as JSON with this structure:
 {{
   "career": "{career}",
-  "relatedMDCProgram": "The actual MDC program name that relates to this career (e.g., 'Biology' for Doctor, 'Pre-Engineering' for Engineer)",
   "degreeLevel": "{degree_level}",
   "associates": {{
-    "programs": ["Specific MDC Program Name"],
+    "programs": ["Program 1", "Program 2"],
     "duration": "2 years",
     "keyCourses": ["Course 1", "Course 2"],
     "financial": {{
@@ -270,15 +262,12 @@ Format the response as JSON with this structure:
     {{"name": "Exam Name", "required": true, "timing": "After BS"}}
   ],
   "internships": ["Internship opportunity 1", "Internship opportunity 2"],
-  "alternativePathways": ["Alternative path 1", "Alternative path 2"],
-  "note": "If the career requires a professional degree (like Doctor, Lawyer), explain the pathway clearly: Associate → Bachelor → Professional Degree"
+  "alternativePathways": ["Alternative path 1", "Alternative path 2"]
 }}
 
-IMPORTANT: For financial, careerOutcomes, and roi fields, provide realistic, data-driven numbers based on actual market data. Keep descriptions concise - focus on numbers and facts, not lengthy explanations. Use actual salary ranges and cost data when possible.
+Be specific and realistic. Focus on MDC (Miami Dade College) programs when applicable. 
 
-Tone: Write as a supportive academic advisor would speak to a student - encouraging, clear, and helpful. Use advisor language like "I recommend", "You'll want to", "This pathway will help you", etc. Be specific and realistic. Focus on MDC (Miami Dade College) programs when applicable. If the exact career isn't available at MDC, suggest the closest related program that leads to that career.
-
-Remember: You're acting as a caring academic advisor helping a student achieve their career goals. Be encouraging and supportive throughout."""
+CRITICAL: You MUST include the financial, careerOutcomes, and roi fields for both associates and bachelors degrees. These fields are required and must contain realistic data. Do not omit them."""
         
         # Use Gemini REST API - v1beta endpoint with gemini-2.5-flash (available model)
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
@@ -295,7 +284,7 @@ Remember: You're acting as a caring academic advisor helping a student achieve t
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=25) as response:
                 result = json.loads(response.read().decode('utf-8'))
                 
                 # Check for errors in response
@@ -311,7 +300,6 @@ Remember: You're acting as a caring academic advisor helping a student achieve t
                     raise Exception(f"Invalid response structure. Full response: {json.dumps(result)}")
                     
                 response_text = result['candidates'][0]['content']['parts'][0]['text']
-                raw_response = json.dumps(result, indent=2)  # Keep full response for debugging
         except urllib.error.HTTPError as e:
             error_body = e.read().decode('utf-8') if hasattr(e, 'read') else str(e)
             print(f"HTTP Error {e.code}: {error_body}")
@@ -330,53 +318,72 @@ Remember: You're acting as a caring academic advisor helping a student achieve t
         
         pathway_data = json.loads(response_text.strip())
         
-        # Validate courses against MDC data
-        if mdc_data and 'associates' in pathway_data and 'keyCourses' in pathway_data['associates']:
-            pathway_data['associates']['keyCourses'] = validate_courses_against_mdc(
-                pathway_data['associates']['keyCourses'],
-                mdc_data
-            )
+        # Ensure financial, careerOutcomes, and roi fields exist (required for accordions)
+        if 'associates' in pathway_data:
+            if 'financial' not in pathway_data['associates']:
+                pathway_data['associates']['financial'] = {
+                    'tuitionPerYear': '4000-6000',
+                    'housingPerMonth': '800-1200',
+                    'booksPerYear': '1200',
+                    'totalCost': '12000-18000'
+                }
+            if 'careerOutcomes' not in pathway_data['associates']:
+                pathway_data['associates']['careerOutcomes'] = {
+                    'entryLevel': [{'title': 'Entry-Level Position', 'salary': '35000-45000'}],
+                    'midCareer': [{'title': 'Mid-Career Position', 'salary': '50000-70000'}]
+                }
+            if 'roi' not in pathway_data['associates']:
+                pathway_data['associates']['roi'] = {
+                    'investment': '15000',
+                    'tenYearEarnings': '400000-500000',
+                    'roiPercentage': '2567',
+                    'breakEvenMonths': '6-8'
+                }
         
-        # Update relatedMDCProgram if we found actual data
+        if 'bachelors' in pathway_data:
+            if 'financial' not in pathway_data['bachelors']:
+                pathway_data['bachelors']['financial'] = {
+                    'tuitionPerYear': '8000-25000',
+                    'housingPerMonth': '1000-1500',
+                    'booksPerYear': '1500',
+                    'totalCost': '21000-35000'
+                }
+            if 'careerOutcomes' not in pathway_data['bachelors']:
+                pathway_data['bachelors']['careerOutcomes'] = {
+                    'entryLevel': [{'title': 'Entry-Level Position', 'salary': '55000-70000'}],
+                    'midCareer': [{'title': 'Mid-Career Position', 'salary': '75000-110000'}]
+                }
+            if 'roi' not in pathway_data['bachelors']:
+                pathway_data['bachelors']['roi'] = {
+                    'investment': '28000',
+                    'tenYearEarnings': '600000-800000',
+                    'roiPercentage': '2143',
+                    'breakEvenMonths': '5-7'
+                }
+        
+        # Optionally validate courses against MDC data (non-blocking)
+        if mdc_data and 'associates' in pathway_data and 'keyCourses' in pathway_data['associates']:
+            try:
+                pathway_data['associates']['keyCourses'] = validate_courses_against_mdc(
+                    pathway_data['associates']['keyCourses'],
+                    mdc_data
+                )
+            except Exception as e:
+                print(f"Course validation warning: {str(e)}")
+        
+        # Add related MDC program if found
         if related_program:
             pathway_data['relatedMDCProgram'] = related_program
         
-        # Fetch real financial data from College Scorecard API
-        try:
-            scorecard_key = get_college_scorecard_api_key()
-            financial_data = get_mdc_financial_data(scorecard_key)
-            
-            if financial_data:
-                # Enhance associates financial data with real MDC data
-                if 'associates' in pathway_data and not pathway_data['associates'].get('financial'):
-                    pathway_data['associates']['financial'] = {}
-                
-                if financial_data.get('tuition_in_state'):
-                    pathway_data['associates']['financial'] = {
-                        'tuitionPerYear': f"{financial_data['tuition_in_state']}",
-                        'housingPerMonth': f"{int(financial_data.get('roomboard', 0) / 12) if financial_data.get('roomboard') else '800-1200'}",
-                        'booksPerYear': f"{financial_data.get('booksupply', 1200)}",
-                        'totalCost': f"{int(financial_data['tuition_in_state']) * 2 + (financial_data.get('booksupply', 1200) * 2)}"
-                    }
-                
-                # Calculate ROI if we have earnings data
-                if financial_data.get('median_earnings_10yr') and 'associates' in pathway_data:
-                    total_cost = int(financial_data['tuition_in_state']) * 2 + (financial_data.get('booksupply', 1200) * 2)
-                    ten_year_earnings = financial_data['median_earnings_10yr'] * 10
-                    roi = ((ten_year_earnings - total_cost) / total_cost * 100) if total_cost > 0 else 0
-                    
-                    if not pathway_data['associates'].get('roi'):
-                        pathway_data['associates']['roi'] = {
-                            'investment': str(total_cost),
-                            'tenYearEarnings': str(ten_year_earnings),
-                            'roiPercentage': str(int(roi)),
-                            'breakEvenMonths': str(int((total_cost / (financial_data['median_earnings_10yr'] / 12)) if financial_data['median_earnings_10yr'] > 0 else 8)))
-                        }
-        except Exception as e:
-            print(f"Error enhancing with College Scorecard data: {str(e)}")
+        # Skip College Scorecard API - it was causing timeouts
+        # Gemini will provide financial data in the response, which is sufficient
+        # The MDC data from DynamoDB is already being used for course validation
         
-        # Add raw response for debugging
-        pathway_data['rawResponse'] = raw_response
+        # Remove raw response from final output (too large for DynamoDB)
+        # Keep it only for debugging if needed
+        if 'rawResponse' in pathway_data:
+            del pathway_data['rawResponse']
+        
         return pathway_data
         
     except Exception as e:

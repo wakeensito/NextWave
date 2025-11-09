@@ -239,6 +239,27 @@ interface PathwayData {
 // API Gateway endpoint
 const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT || 'https://btoccmzs5b.execute-api.us-east-1.amazonaws.com/prod/pathway';
 
+// Helper function to format numbers with commas
+const formatNumber = (value: string | undefined): string => {
+  if (!value) return '';
+  
+  // If already has commas, return as is
+  if (value.includes(',')) return value;
+  
+  // Handle ranges like "4000-6000" or "4000 - 6000"
+  if (value.includes('-')) {
+    const parts = value.split(/-|\s*-\s*/);
+    return parts.map(part => {
+      const num = parseInt(part.trim());
+      return isNaN(num) ? part.trim() : num.toLocaleString();
+    }).join('-');
+  }
+  
+  // Handle single numbers
+  const num = parseInt(value.trim());
+  return isNaN(num) ? value : num.toLocaleString();
+};
+
 export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps) {
   const [step, setStep] = useState(1);
   const [career, setCareer] = useState(initialSearch);
@@ -380,6 +401,54 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
       if (data.pathway) {
         // Normalize the pathway data to handle API inconsistencies
         const normalizedPathway = normalizePathwayData(data.pathway);
+        
+        // Ensure financial, careerOutcomes, and roi fields exist (for accordions)
+        if (normalizedPathway.associates && !normalizedPathway.associates.financial) {
+          normalizedPathway.associates.financial = {
+            tuitionPerYear: '4000-6000',
+            housingPerMonth: '800-1200',
+            booksPerYear: '1200',
+            totalCost: '12000-18000'
+          };
+        }
+        if (normalizedPathway.associates && !normalizedPathway.associates.careerOutcomes) {
+          normalizedPathway.associates.careerOutcomes = {
+            entryLevel: [{ title: 'Entry-Level Position', salary: '35000-45000' }],
+            midCareer: [{ title: 'Mid-Career Position', salary: '50000-70000' }]
+          };
+        }
+        if (normalizedPathway.associates && !normalizedPathway.associates.roi) {
+          normalizedPathway.associates.roi = {
+            investment: '15000',
+            tenYearEarnings: '400000-500000',
+            roiPercentage: '2567',
+            breakEvenMonths: '6-8'
+          };
+        }
+        
+        if (normalizedPathway.bachelors && !normalizedPathway.bachelors.financial) {
+          normalizedPathway.bachelors.financial = {
+            tuitionPerYear: '8000-25000',
+            housingPerMonth: '1000-1500',
+            booksPerYear: '1500',
+            totalCost: '21000-35000'
+          };
+        }
+        if (normalizedPathway.bachelors && !normalizedPathway.bachelors.careerOutcomes) {
+          normalizedPathway.bachelors.careerOutcomes = {
+            entryLevel: [{ title: 'Entry-Level Position', salary: '55000-70000' }],
+            midCareer: [{ title: 'Mid-Career Position', salary: '75000-110000' }]
+          };
+        }
+        if (normalizedPathway.bachelors && !normalizedPathway.bachelors.roi) {
+          normalizedPathway.bachelors.roi = {
+            investment: '28000',
+            tenYearEarnings: '600000-800000',
+            roiPercentage: '2143',
+            breakEvenMonths: '5-7'
+          };
+        }
+        
         setPathway(normalizedPathway);
       } else {
         console.error('No pathway in response:', data);
@@ -830,7 +899,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                           )}
                           
                           {/* Financial Data Accordion */}
-                          {pathway.associates?.financial && (
+                          {pathway.associates && (
                             <Accordion 
                               title="Financial Information" 
                               icon={<DollarSign className="w-4 h-4" />}
@@ -840,19 +909,19 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                 <div className="grid grid-cols-2 gap-3">
                                   <div className="bg-white/60 rounded-lg p-3">
                                     <p className="text-xs text-gray-500 mb-1">Tuition (per year)</p>
-                                    <p className="font-semibold text-gray-900">${pathway.associates.financial.tuitionPerYear || '4,000 - 6,000'}</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.associates.financial?.tuitionPerYear) || '4,000-6,000'}</p>
                                   </div>
                                   <div className="bg-white/60 rounded-lg p-3">
                                     <p className="text-xs text-gray-500 mb-1">Housing (per month)</p>
-                                    <p className="font-semibold text-gray-900">${pathway.associates.financial.housingPerMonth || '800 - 1,200'}</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.associates.financial?.housingPerMonth) || '800-1,200'}</p>
                                   </div>
                                   <div className="bg-white/60 rounded-lg p-3">
                                     <p className="text-xs text-gray-500 mb-1">Books & Supplies</p>
-                                    <p className="font-semibold text-gray-900">${pathway.associates.financial.booksPerYear || '1,200'}/year</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.associates.financial?.booksPerYear) || '1,200'}/year</p>
                                   </div>
                                   <div className="bg-white/60 rounded-lg p-3">
                                     <p className="text-xs text-gray-500 mb-1">Total (2 years)</p>
-                                    <p className="font-semibold text-gray-900">${pathway.associates.financial.totalCost || '12,000 - 18,000'}</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.associates.financial?.totalCost) || '12,000-18,000'}</p>
                                   </div>
                                 </div>
                                 <div className="bg-gradient-to-r from-cyan-50 to-teal-50 rounded-lg p-3 border border-cyan-200">
@@ -864,7 +933,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                           )}
 
                           {/* Career Outcomes Accordion */}
-                          {pathway.associates?.careerOutcomes && (
+                          {pathway.associates && (
                             <Accordion 
                               title="Career Outcomes & Salaries" 
                               icon={<Briefcase className="w-4 h-4" />}
@@ -878,7 +947,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                       {pathway.associates.careerOutcomes.entryLevel.map((job, idx) => (
                                         <div key={idx} className="flex justify-between items-center">
                                           <span className="text-gray-700">{job.title}</span>
-                                          <span className="font-semibold text-cyan-600">${job.salary}</span>
+                                          <span className="font-semibold text-cyan-600">${formatNumber(job.salary)}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -891,7 +960,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                       {pathway.associates.careerOutcomes.midCareer.map((job, idx) => (
                                         <div key={idx} className="flex justify-between items-center">
                                           <span className="text-gray-700">{job.title}</span>
-                                          <span className="font-semibold text-cyan-600">${job.salary}</span>
+                                          <span className="font-semibold text-cyan-600">${formatNumber(job.salary)}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -909,7 +978,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                           )}
 
                           {/* ROI Calculator Accordion */}
-                          {pathway.associates?.roi && (
+                          {pathway.associates && (
                             <Accordion 
                               title="ROI Calculator" 
                               icon={<TrendingUp className="w-4 h-4" />}
@@ -924,7 +993,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                 <div className="grid grid-cols-2 gap-3">
                                   <div className="bg-gradient-to-br from-cyan-50 to-teal-50 rounded-lg p-3 border border-cyan-200">
                                     <p className="text-xs text-gray-500 mb-1">10-Year Earnings</p>
-                                    <p className="font-semibold text-gray-900">${pathway.associates.roi.tenYearEarnings || '400K - 500K'}</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.associates.roi?.tenYearEarnings) || '400,000-500,000'}</p>
                                   </div>
                                   <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-lg p-3 border border-emerald-200">
                                     <p className="text-xs text-gray-500 mb-1">ROI</p>
@@ -982,7 +1051,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                           )}
 
                           {/* Financial Data Accordion */}
-                          {pathway.bachelors?.financial && (
+                          {pathway.bachelors && (
                             <Accordion 
                               title="Financial Information" 
                               icon={<DollarSign className="w-4 h-4" />}
@@ -992,19 +1061,19 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                 <div className="grid grid-cols-2 gap-3">
                                   <div className="bg-white/60 rounded-lg p-3">
                                     <p className="text-xs text-gray-500 mb-1">Tuition (per year)</p>
-                                    <p className="font-semibold text-gray-900">${pathway.bachelors.financial.tuitionPerYear || '8,000 - 15,000'}</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.bachelors.financial?.tuitionPerYear) || '8,000-25,000'}</p>
                                   </div>
                                   <div className="bg-white/60 rounded-lg p-3">
                                     <p className="text-xs text-gray-500 mb-1">Housing (per month)</p>
-                                    <p className="font-semibold text-gray-900">${pathway.bachelors.financial.housingPerMonth || '1,000 - 1,500'}</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.bachelors.financial?.housingPerMonth) || '1,000-1,500'}</p>
                                   </div>
                                   <div className="bg-white/60 rounded-lg p-3">
                                     <p className="text-xs text-gray-500 mb-1">Books & Supplies</p>
-                                    <p className="font-semibold text-gray-900">${pathway.bachelors.financial.booksPerYear || '1,500'}/year</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.bachelors.financial?.booksPerYear) || '1,500'}/year</p>
                                   </div>
                                   <div className="bg-white/60 rounded-lg p-3">
                                     <p className="text-xs text-gray-500 mb-1">Total (2 years)</p>
-                                    <p className="font-semibold text-gray-900">${pathway.bachelors.financial.totalCost || '21,000 - 35,000'}</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.bachelors.financial?.totalCost) || '21,000-35,000'}</p>
                                   </div>
                                 </div>
                                 <div className="bg-gradient-to-r from-teal-50 to-cyan-50 rounded-lg p-3 border border-teal-200">
@@ -1016,7 +1085,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                           )}
 
                           {/* Career Outcomes Accordion */}
-                          {pathway.bachelors?.careerOutcomes && (
+                          {pathway.bachelors && (
                             <Accordion 
                               title="Career Outcomes & Salaries" 
                               icon={<Briefcase className="w-4 h-4" />}
@@ -1030,7 +1099,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                       {pathway.bachelors.careerOutcomes.entryLevel.map((job, idx) => (
                                         <div key={idx} className="flex justify-between items-center">
                                           <span className="text-gray-700">{job.title}</span>
-                                          <span className="font-semibold text-teal-600">${job.salary}</span>
+                                          <span className="font-semibold text-teal-600">${formatNumber(job.salary)}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -1043,7 +1112,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                       {pathway.bachelors.careerOutcomes.midCareer.map((job, idx) => (
                                         <div key={idx} className="flex justify-between items-center">
                                           <span className="text-gray-700">{job.title}</span>
-                                          <span className="font-semibold text-teal-600">${job.salary}</span>
+                                          <span className="font-semibold text-teal-600">${formatNumber(job.salary)}</span>
                                         </div>
                                       ))}
                                     </div>
@@ -1061,7 +1130,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                           )}
 
                           {/* ROI Calculator Accordion */}
-                          {pathway.bachelors?.roi && (
+                          {pathway.bachelors && (
                             <Accordion 
                               title="ROI Calculator" 
                               icon={<TrendingUp className="w-4 h-4" />}
@@ -1076,7 +1145,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                 <div className="grid grid-cols-2 gap-3">
                                   <div className="bg-gradient-to-br from-teal-50 to-cyan-50 rounded-lg p-3 border border-teal-200">
                                     <p className="text-xs text-gray-500 mb-1">10-Year Earnings</p>
-                                    <p className="font-semibold text-gray-900">${pathway.bachelors.roi.tenYearEarnings || '600K - 800K'}</p>
+                                    <p className="font-semibold text-gray-900">${formatNumber(pathway.bachelors.roi?.tenYearEarnings) || '600,000-800,000'}</p>
                                   </div>
                                   <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-lg p-3 border border-emerald-200">
                                     <p className="text-xs text-gray-500 mb-1">ROI</p>

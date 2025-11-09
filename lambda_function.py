@@ -12,6 +12,7 @@ dynamodb = boto3.resource('dynamodb')
 ssm = boto3.client('ssm')
 table = dynamodb.Table('CareerPathways')
 mdc_programs_table = dynamodb.Table('MDCPrograms')
+certifications_table = dynamodb.Table('MDCCertifications')
 
 def get_gemini_api_key():
     """Retrieve Gemini API key from Secrets Manager or Parameter Store"""
@@ -449,10 +450,10 @@ IMPORTANT: Even if "{career}" is not an exact MDC program, suggest the closest r
 - "Data Analyst" → Computer Science or Business Analytics pathway
 - "Software Engineer" → Computer Science pathway  
 - "Nurse Practitioner" → Nursing pathway
-- "Anime" or "Animation" → Digital Media, Graphic Design, or Computer Science pathway
+- "Cartoons" or "Animation" → Digital Media, Graphic Design, or Computer Science pathway
 - Handle typos and creative careers by finding the closest educational match
 
-{mdc_context}Return JSON: career, degreeLevel, note (a clear, concise 2-3 sentence personalized message as a career advisor), associates {{programs, duration, keyCourses (limit to 5 courses)}}, bachelors {{universities (use "Miami Dade College" if MDC offers this Bachelor's program, otherwise list transfer universities), duration, keyCourses (limit to 5 courses), articulationAgreements}}, masters, professionalDegree, certifications (ONLY include if absolutely required for this career - omit entirely if not needed), exams (ONLY include if absolutely required for this career - omit entirely if not needed), internships.
+{mdc_context}Return JSON: career, degreeLevel, note (a clear, concise 2-3 sentence personalized message as a career advisor), associates {{programs, duration, keyCourses (limit to 5 courses)}}, bachelors {{universities (use "Miami Dade College" if MDC offers this Bachelor's program, otherwise list transfer universities), duration, keyCourses (limit to 5 courses), articulationAgreements}}, masters, professionalDegree, certifications (ONLY include if absolutely required - format as array of simple names like ["Certificate Name 1", "Certificate Name 2"], max 5, keep concise 1 line each), exams (ONLY include if absolutely required - format as array of simple names, max 5, keep concise 1 line each), internships.
 
 ALWAYS include associates section (MDC Associate's degree). {bachelors_instruction} 
 
@@ -612,6 +613,27 @@ CRITICAL:
         # Add related MDC program if found
         if related_program:
             pathway_data['relatedMDCProgram'] = related_program
+        
+        # Add FULL course list from MDC database for PDF generation
+        if mdc_data and 'courses' in mdc_data and mdc_data['courses']:
+            # Format courses as "CODE - Name" for better readability
+            full_course_list = []
+            for course in mdc_data['courses']:
+                if isinstance(course, dict):
+                    code = course.get('code', '')
+                    name = course.get('name', '')
+                    if code and name:
+                        full_course_list.append(f"{code} - {name}")
+                    elif name:
+                        full_course_list.append(name)
+                elif isinstance(course, str):
+                    full_course_list.append(course)
+            
+            # Add full course list to associates section
+            if 'associates' in pathway_data:
+                if not isinstance(pathway_data['associates'], dict):
+                    pathway_data['associates'] = {}
+                pathway_data['associates']['fullCourseList'] = full_course_list
 
         # Ensure note (advisorNote) exists - if not, create a default one
         if 'note' not in pathway_data and 'advisorNote' in pathway_data:
@@ -762,6 +784,152 @@ CRITICAL:
             }
         }
 
+def match_certifications(career, degree_level):
+    """Agent 4: Match certifications to career pathway using Gemini + DynamoDB"""
+    try:
+        api_key = get_gemini_api_key()
+        
+        # 1. Query DynamoDB for existing certifications related to this career
+        related_certs = []
+        
+        try:
+            # Scan MDCCertifications table for certificates
+            response = certifications_table.scan()
+            all_items = response.get('Items', [])
+            
+            # Get career keywords for matching
+            career_lower = career.lower()
+            career_keywords = career_lower.split()
+            
+            # Filter items that might be related (basic keyword matching)
+            potential_matches = []
+            for item in all_items:
+                cert_name = item.get('certificateName', '').lower()
+                description = item.get('description', '').lower()
+                pdf_content = item.get('pdfContent', '').lower()
+                
+                # Check if any career keyword appears in certificate info
+                if any(keyword in cert_name or keyword in description or keyword in pdf_content 
+                       for keyword in career_keywords if len(keyword) > 3):
+                    potential_matches.append(item)
+            
+            # Limit to top 20 potential matches to avoid too large prompt
+            potential_matches = potential_matches[:20]
+            
+        except Exception as e:
+            print(f"Error querying certifications DynamoDB: {str(e)}")
+            potential_matches = []
+        
+        # 2. Use Gemini to analyze and match certificates to career
+        if potential_matches:
+            # Build context from DynamoDB data
+            certs_context = "\n".join([
+                f"- {item.get('certificateName', 'Unknown')}: {item.get('description', '')[:200]}"
+                for item in potential_matches[:10]  # Limit to 10 for prompt
+            ])
+            
+            prompt = f"""You are a career advisor helping match MDC certificates to a {career} career path.
+
+Available Certificates:
+{certs_context}
+
+Analyze which certificates are most relevant for a student pursuing a {career} career with a {degree_level} degree.
+
+Return JSON format:
+{{
+  "certifications": [
+    {{
+      "name": "Certificate Name",
+      "relevance": "high/medium/low"
+    }}
+  ]
+}}
+
+CRITICAL REQUIREMENTS:
+- Only include items with "high" or "medium" relevance
+- Limit to top 5 certifications maximum
+- Use ONLY the certificate name - no descriptions, no explanations, no extra text
+- Keep names concise (1 line max, typically 2-5 words)
+- Example: "Medical Assistant Certificate" not "Medical Assistant Certificate which provides training in..."
+"""
+            
+            # Use Gemini REST API
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+            
+            payload = {
+                "contents": [{
+                    "parts": [{
+                        "text": prompt
+                    }]
+                }]
+            }
+            
+            data = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+            
+            try:
+                with urllib.request.urlopen(req, timeout=20) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    
+                    if 'error' in result:
+                        raise Exception(f"Gemini API error: {result['error']}")
+                    
+                    if 'candidates' not in result or len(result['candidates']) == 0:
+                        raise Exception("No candidates in Gemini response")
+                    
+                    response_text = result['candidates'][0]['content']['parts'][0]['text']
+                    
+                    # Extract JSON
+                    if '```json' in response_text:
+                        response_text = response_text.split('```json')[1].split('```')[0]
+                    elif '```' in response_text:
+                        response_text = response_text.split('```')[1].split('```')[0]
+                    
+                    # Parse JSON
+                    try:
+                        matches = json.loads(response_text.strip())
+                        
+                        # Format certifications - keep it simple and concise
+                        if 'certifications' in matches:
+                            related_certs = [
+                                {
+                                    'name': cert.get('name', '').strip()[:80],  # Limit length, keep concise
+                                    'required': False  # Certificates are optional
+                                }
+                                for cert in matches['certifications']
+                                if cert.get('relevance') in ['high', 'medium'] and cert.get('name', '').strip()
+                            ][:5]  # Limit to 5
+                            
+                    except json.JSONDecodeError as e:
+                        print(f"JSON decode error in Agent 4: {str(e)}")
+                        # Try to extract JSON from text
+                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                        if json_match:
+                            try:
+                                matches = json.loads(json_match.group(0))
+                                if 'certifications' in matches:
+                                    related_certs = matches['certifications'][:5]
+                            except:
+                                pass
+                        
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode('utf-8') if hasattr(e, 'read') else str(e)
+                print(f"HTTP Error in Agent 4: {e.code}: {error_body}")
+            except Exception as e:
+                print(f"Error calling Gemini in Agent 4: {str(e)}")
+        
+        return {
+            'certifications': related_certs
+        }
+        
+    except Exception as e:
+        print(f"Error in Agent 4 (certifications): {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        return {
+            'certifications': []
+        }
+
 def lambda_handler(event, context):
     """Main Lambda handler - routes to pathway or chat based on path"""
     # Check the API Gateway path to route requests
@@ -831,14 +999,16 @@ def lambda_handler(event, context):
         except Exception as e:
             print(f"DynamoDB read error: {str(e)}")
         
-        # Not in cache, generate with 2 agents in parallel
+        # Not in cache, generate with 3 agents in parallel
         pathway_data = None
         career_data = None
+        certifications_data = None
         
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            # Submit both agents to run in parallel
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Submit all three agents to run in parallel
             pathway_future = executor.submit(generate_pathway_structure, career, degree_level)
             career_future = executor.submit(generate_career_outcomes, career, degree_level)
+            certifications_future = executor.submit(match_certifications, career, degree_level)
             
             # Wait for both to complete
             try:
@@ -882,8 +1052,16 @@ def lambda_handler(event, context):
                         }
                     }
                 }
+            
+            try:
+                certifications_data = certifications_future.result(timeout=20)
+            except Exception as e:
+                print(f"Agent 4 (certifications) failed: {str(e)}")
+                certifications_data = {
+                    'certifications': []
+                }
         
-        # Merge results from both agents
+        # Merge results from all three agents
         # Get static financial data (no AI needed)
         financial_data = get_static_financial_data(degree_level)
         
@@ -1037,6 +1215,20 @@ def lambda_handler(event, context):
         # Ensure note exists (advisor message)
         if 'note' not in pathway_data or not pathway_data.get('note'):
             pathway_data['note'] = f"Starting with an Associate's degree at MDC provides a solid foundation for your {career} career. Focus on building core skills and maintaining strong academic performance to maximize your opportunities."
+        
+        # Merge Agent 4 results (certifications) into pathway data
+        if certifications_data and isinstance(certifications_data, dict):
+            # Merge certifications from Agent 4 (only if Agent 1 didn't provide any)
+            if 'certifications' not in pathway_data or not pathway_data.get('certifications'):
+                if certifications_data.get('certifications'):
+                    pathway_data['certifications'] = certifications_data['certifications']
+            elif pathway_data.get('certifications') and certifications_data.get('certifications'):
+                # Merge both sources, avoiding duplicates
+                existing_names = {c.get('name', '') for c in pathway_data['certifications'] if isinstance(c, dict)}
+                for cert in certifications_data['certifications']:
+                    if isinstance(cert, dict) and cert.get('name') not in existing_names:
+                        pathway_data['certifications'].append(cert)
+                        existing_names.add(cert.get('name', ''))
         
         # Only add certifications/exams if they don't exist (don't override if they were deleted)
         # If they were deleted by the filtering logic above, they won't be in the dict, which is correct

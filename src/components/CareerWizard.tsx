@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, ArrowRight, Sparkles, GraduationCap, MapPin, CheckCircle2, Waves, Loader2, ChevronDown, DollarSign, Briefcase, TrendingUp, Scale, Stethoscope, BookOpen } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Sparkles, GraduationCap, MapPin, CheckCircle2, Waves, Loader2, ChevronDown, DollarSign, Briefcase, TrendingUp, Scale, Stethoscope, BookOpen, Download } from 'lucide-react';
+import jsPDF from 'jspdf';
 
 // Animated Shark Loading Component
 function LoadingShark() {
@@ -176,6 +177,7 @@ interface PathwayData {
     programs: string[];
     duration: string;
     keyCourses: string[];
+    fullCourseList?: string[]; // Full course list from MDC database
     financial?: {
       tuitionPerYear?: string;
       housingPerMonth?: string;
@@ -192,6 +194,7 @@ interface PathwayData {
     articulationAgreements?: string[] | string;
     duration?: string;
     keyCourses?: string[];
+    fullCourseList?: string[]; // Full course list from MDC database
     financial?: {
       tuitionPerYear?: string;
       housingPerMonth?: string;
@@ -249,6 +252,243 @@ const formatNumber = (value: string | undefined): string => {
 };
 
 
+// PDF Generation Function
+function generateRoadmapPDF(pathway: PathwayData) {
+  const doc = new jsPDF();
+  let yPos = 20;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 20;
+  const maxWidth = pageWidth - (margin * 2);
+  
+  // Helper function to add a new page if needed
+  const checkPageBreak = (requiredSpace: number = 10) => {
+    if (yPos + requiredSpace > doc.internal.pageSize.getHeight() - 20) {
+      doc.addPage();
+      yPos = 20;
+    }
+  };
+  
+  // Helper function to add text with word wrap
+  const addText = (text: string, fontSize: number, isBold: boolean = false, color: string = '#000000') => {
+    checkPageBreak(fontSize + 5);
+    doc.setFontSize(fontSize);
+    doc.setFont('helvetica', isBold ? 'bold' : 'normal');
+    doc.setTextColor(color);
+    const lines = doc.splitTextToSize(text, maxWidth);
+    doc.text(lines, margin, yPos);
+    yPos += (lines.length * fontSize * 0.4) + 5;
+  };
+  
+  // Helper function to add a section header
+  const addSectionHeader = (text: string) => {
+    checkPageBreak(15);
+    yPos += 5;
+    addText(text, 14, true, '#0891b2'); // Cyan color
+    yPos += 2;
+  };
+  
+  // Helper function to add a list
+  const addList = (items: string[], prefix: string = '•') => {
+    items.forEach((item, index) => {
+      checkPageBreak(8);
+      const listText = `${prefix} ${item}`;
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor('#000000');
+      const lines = doc.splitTextToSize(listText, maxWidth - 10);
+      doc.text(lines, margin + 5, yPos);
+      yPos += (lines.length * 10 * 0.4) + 3;
+    });
+  };
+  
+  // Title
+  doc.setFillColor(8, 145, 178); // Cyan
+  doc.rect(0, 0, pageWidth, 40, 'F');
+  doc.setTextColor('#FFFFFF');
+  doc.setFontSize(24);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Career Roadmap', margin, 25);
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'normal');
+  doc.text(pathway.career || 'Your Career Path', margin, 35);
+  yPos = 50;
+  doc.setTextColor('#000000');
+  
+  // Advisor Note
+  if (pathway.note) {
+    addSectionHeader('Career Advisor Message');
+    addText(pathway.note, 11, false);
+    yPos += 5;
+  }
+  
+  // Associate's Degree Section
+  if (pathway.associates) {
+    addSectionHeader('Associate\'s Degree Program');
+    
+    if (pathway.associates.programs && pathway.associates.programs.length > 0) {
+      addText('Programs:', 11, true);
+      addList(pathway.associates.programs);
+      yPos += 3;
+    }
+    
+    if (pathway.associates.duration) {
+      addText(`Duration: ${pathway.associates.duration}`, 11, false);
+    }
+    
+    // Full Course List - Use fullCourseList from DB if available, otherwise keyCourses
+    const courseList = pathway.associates.fullCourseList || pathway.associates.keyCourses || [];
+    if (courseList.length > 0) {
+      addText('Complete Course Roadmap:', 12, true);
+      if (pathway.associates.fullCourseList) {
+        addText(`(Full course list from MDC database - ${courseList.length} courses)`, 9, false, '#666666');
+      }
+      yPos += 2;
+      addList(courseList);
+      yPos += 5;
+    }
+    
+    // Financial Information
+    if (pathway.associates.financial) {
+      addSectionHeader('Financial Information');
+      const financial = pathway.associates.financial;
+      if (financial.tuitionPerYear) addText(`Tuition per Year: $${financial.tuitionPerYear}`, 10);
+      if (financial.housingPerMonth) addText(`Housing per Month: $${financial.housingPerMonth}`, 10);
+      if (financial.booksPerYear) addText(`Books per Year: $${financial.booksPerYear}`, 10);
+      if (financial.totalCost) addText(`Total Estimated Cost: $${financial.totalCost}`, 10, true);
+      yPos += 5;
+    }
+    
+    // Career Outcomes
+    if (pathway.associates.careerOutcomes) {
+      addSectionHeader('Career Outcomes');
+      if (pathway.associates.careerOutcomes.entryLevel && pathway.associates.careerOutcomes.entryLevel.length > 0) {
+        addText('Entry-Level Positions:', 11, true);
+        pathway.associates.careerOutcomes.entryLevel.forEach(job => {
+          addText(`  • ${job.title}: $${job.salary}`, 10);
+        });
+        yPos += 3;
+      }
+      if (pathway.associates.careerOutcomes.midCareer && pathway.associates.careerOutcomes.midCareer.length > 0) {
+        addText('Mid-Career Positions:', 11, true);
+        pathway.associates.careerOutcomes.midCareer.forEach(job => {
+          addText(`  • ${job.title}: $${job.salary}`, 10);
+        });
+      }
+      yPos += 5;
+    }
+  }
+  
+  // Bachelor's Degree Section
+  if (pathway.bachelors) {
+    addSectionHeader('Bachelor\'s Degree Program');
+    
+    if (pathway.bachelors.universities && pathway.bachelors.universities.length > 0) {
+      addText('Universities:', 11, true);
+      addList(pathway.bachelors.universities);
+      yPos += 3;
+    }
+    
+    if (pathway.bachelors.duration) {
+      addText(`Duration: ${pathway.bachelors.duration}`, 11, false);
+    }
+    
+    // Full Course List for Bachelor's - Use fullCourseList if available
+    const bachCourseList = pathway.bachelors.fullCourseList || pathway.bachelors.keyCourses || [];
+    if (bachCourseList.length > 0) {
+      addText('Complete Course Roadmap:', 12, true);
+      if (pathway.bachelors.fullCourseList) {
+        addText(`(Full course list from MDC database - ${bachCourseList.length} courses)`, 9, false, '#666666');
+      }
+      yPos += 2;
+      addList(bachCourseList);
+      yPos += 5;
+    }
+    
+    // Financial Information
+    if (pathway.bachelors.financial) {
+      addSectionHeader('Financial Information');
+      const financial = pathway.bachelors.financial;
+      if (financial.tuitionPerYear) addText(`Tuition per Year: $${financial.tuitionPerYear}`, 10);
+      if (financial.housingPerMonth) addText(`Housing per Month: $${financial.housingPerMonth}`, 10);
+      if (financial.booksPerYear) addText(`Books per Year: $${financial.booksPerYear}`, 10);
+      if (financial.totalCost) addText(`Total Estimated Cost: $${financial.totalCost}`, 10, true);
+      yPos += 5;
+    }
+    
+    // Career Outcomes
+    if (pathway.bachelors.careerOutcomes) {
+      addSectionHeader('Career Outcomes');
+      if (pathway.bachelors.careerOutcomes.entryLevel && pathway.bachelors.careerOutcomes.entryLevel.length > 0) {
+        addText('Entry-Level Positions:', 11, true);
+        pathway.bachelors.careerOutcomes.entryLevel.forEach(job => {
+          addText(`  • ${job.title}: $${job.salary}`, 10);
+        });
+        yPos += 3;
+      }
+      if (pathway.bachelors.careerOutcomes.midCareer && pathway.bachelors.careerOutcomes.midCareer.length > 0) {
+        addText('Mid-Career Positions:', 11, true);
+        pathway.bachelors.careerOutcomes.midCareer.forEach(job => {
+          addText(`  • ${job.title}: $${job.salary}`, 10);
+        });
+      }
+      yPos += 5;
+    }
+  }
+  
+  // Certifications
+  if (pathway.certifications && pathway.certifications.length > 0) {
+    addSectionHeader('Certifications');
+    const certNames = pathway.certifications.map(cert => 
+      typeof cert === 'string' ? cert : cert.name || ''
+    ).filter(name => name.trim());
+    if (certNames.length > 0) {
+      addList(certNames);
+      yPos += 5;
+    }
+  }
+  
+  // Exams
+  if (pathway.exams && pathway.exams.length > 0) {
+    addSectionHeader('Required Exams');
+    const examNames = pathway.exams.map(exam => 
+      typeof exam === 'string' ? exam : exam.name || ''
+    ).filter(name => name.trim());
+    if (examNames.length > 0) {
+      addList(examNames);
+      yPos += 5;
+    }
+  }
+  
+  // Internships
+  if (pathway.internships && pathway.internships.length > 0) {
+    addSectionHeader('Internship Opportunities');
+    const internshipNames = pathway.internships.map(internship => 
+      typeof internship === 'string' ? internship : internship.name || internship.title || ''
+    ).filter(name => name.trim());
+    if (internshipNames.length > 0) {
+      addList(internshipNames);
+    }
+  }
+  
+  // Footer on last page
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor('#666666');
+    doc.text(
+      `Generated by Next Wave - Miami Dade College | Page ${i} of ${pageCount}`,
+      pageWidth / 2,
+      doc.internal.pageSize.getHeight() - 10,
+      { align: 'center' }
+    );
+  }
+  
+  // Generate filename
+  const filename = `${pathway.career?.replace(/[^a-z0-9]/gi, '_') || 'roadmap'}_roadmap.pdf`;
+  doc.save(filename);
+}
+
 export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps) {
   const [step, setStep] = useState(1);
   const [career, setCareer] = useState(initialSearch);
@@ -267,7 +507,7 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
     'lawyer',
     'movies',
     'engineering',
-    'anime',
+    'cartoons',
     'medicine'
   ];
 
@@ -1498,11 +1738,11 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                                   .map((cert, idx) => {
                                     const certName = typeof cert === 'string' ? cert : (cert?.name || cert);
                                     const required = typeof cert === 'object' && cert?.required;
-                                    const timing = typeof cert === 'object' && cert?.timing ? ` - ${cert.timing}` : '';
+                                    // Keep it concise - just the name, no timing or extra text
                                     return (
-                                      <div key={idx} className="flex items-start gap-2 text-sm text-gray-700 mb-2 leading-relaxed">
+                                      <div key={idx} className="flex items-start gap-2 text-sm text-gray-700 mb-1.5">
                                         <div className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 flex-shrink-0"></div>
-                                        <span>{certName}{required && <span className="text-red-600 font-medium"> (Required)</span>}{timing}</span>
+                                        <span className="line-clamp-1">{certName}{required && <span className="text-red-600 font-medium"> (Required)</span>}</span>
                                       </div>
                                     );
                                   })}
@@ -1602,12 +1842,29 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
                 transition={{ delay: 0.8 }}
                 className="mt-16 flex flex-col sm:flex-row gap-4 justify-center"
               >
-                <button className="px-8 py-4 bg-gradient-to-r from-cyan-600 to-teal-600 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2">
-                  <Sparkles className="w-5 h-5" />
+                <button 
+                  onClick={() => {
+                    if (pathway) {
+                      generateRoadmapPDF(pathway);
+                    }
+                  }}
+                  className="px-8 py-4 bg-gradient-to-r from-cyan-600 to-teal-600 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2"
+                >
+                  <Download className="w-5 h-5" />
                   Save My Roadmap
                 </button>
-                <button className="px-8 py-4 bg-white border-2 border-gray-300 text-gray-700 rounded-xl hover:border-cyan-300 hover:shadow-lg transition-all duration-300">
-                  Explore Programs
+                <button 
+                  onClick={() => {
+                    setStep(1);
+                    setCareer('');
+                    setDegree('');
+                    setPathway(null);
+                    setError(null);
+                  }}
+                  className="px-8 py-4 bg-white border-2 border-gray-300 text-gray-700 rounded-xl hover:border-cyan-300 hover:shadow-lg transition-all duration-300 flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-5 h-5" />
+                  New Wave
                 </button>
               </motion.div>
 

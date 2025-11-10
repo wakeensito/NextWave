@@ -78,8 +78,8 @@ def get_agent_endpoint():
             )
             return response['Parameter']['Value']
         except ssm.exceptions.ParameterNotFound:
-            # Default endpoint (can be overridden via Parameter Store)
-            return 'https://acx5dwqzgp76e34tk5oysuly.agents.do-ai.run'
+            # Agent endpoint must be configured in Parameter Store
+            raise Exception("Agent endpoint not found in Parameter Store. Please set 'agent-endpoint' or '/nextwave/agent-endpoint' in SSM Parameter Store.")
 
 def get_agent_api_key():
     """Retrieve Agent API key from Parameter Store"""
@@ -115,7 +115,8 @@ def get_agent_endpoint():
             )
             return response['Parameter']['Value']
         except ssm.exceptions.ParameterNotFound:
-            return 'https://acx5dwqzgp76e34tk5oysuly.agents.do-ai.run'
+            # Agent endpoint must be configured in Parameter Store
+            raise Exception("Agent endpoint not found in Parameter Store. Please set 'agent-endpoint' or '/nextwave/agent-endpoint' in SSM Parameter Store.")
 
 def handle_chat_request(event, context):
     """Handle chatbot API requests - proxies to DigitalOcean agent"""

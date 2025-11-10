@@ -228,8 +228,11 @@ interface PathwayData {
   rawResponse?: string;
 }
 
-// API Gateway endpoint
-const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT || 'https://btoccmzs5b.execute-api.us-east-1.amazonaws.com/prod/pathway';
+// API Gateway endpoint - must be set via environment variable
+const API_ENDPOINT = import.meta.env.VITE_API_ENDPOINT;
+if (!API_ENDPOINT) {
+  console.error('VITE_API_ENDPOINT environment variable is not set');
+}
 
 // Helper function to format numbers with commas
 const formatNumber = (value: string | undefined): string => {
@@ -572,6 +575,12 @@ export function CareerWizard({ initialSearch = '', onClose }: CareerWizardProps)
 
   const fetchPathway = async () => {
     if (!career.trim() || !degree) return;
+
+    if (!API_ENDPOINT) {
+      setError('API endpoint is not configured. Please set VITE_API_ENDPOINT environment variable.');
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
